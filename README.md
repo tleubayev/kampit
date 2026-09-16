@@ -33,4 +33,4 @@ Run `npm test` on Node.js 24. Tests cover Telegram auth, lobby readiness, countd
 
 ## Deployment
 
-Run behind HTTPS (for example, a reverse proxy on a small VPS) with a persistent volume. Set the six required environment variables and use a process supervisor. `/health` reports service and price freshness. For production scaling beyond one process, move sessions and the scheduler to shared coordination and use a hosted database.
+Build with `docker build -t sol-quick-battle .`, then run the container behind HTTPS with a persistent volume mounted at `/data` and the required environment variables. Alternatively, run Node.js directly behind a reverse proxy. Set the six required environment variables and use a process supervisor. `/health` reports service and price freshness. For production scaling beyond one process, move sessions and the scheduler to shared coordination and use a hosted database.
