@@ -23,6 +23,8 @@ const feed = new CoinbasePriceFeed();
 const bot = new Bot(token, username, shortName, engine);
 const sessions = new Map<string, { identity: TelegramIdentity; expires: number }>();
 const streams = new Map<string, Set<{ res: ServerResponse; userId: string }>>();
+const pendingUpdates = new Map<number, Promise<void>>();
+const delivering = new Set<string>();
 
 function json(res: ServerResponse, status: number, value: unknown) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value));
@@ -50,10 +52,23 @@ function broadcast(id: string) {
   }
 }
 engine.on('change', battle => broadcast(battle.id));
-engine.on('resolved', battle => void bot.result(battle).catch(error => console.error('Result post:', error)));
+async function deliverResult(id: string) {
+  if (delivering.has(id)) return;
+  delivering.add(id);
+  try {
+    await bot.result(engine.require(id));
+    store.db.prepare('INSERT OR IGNORE INTO result_deliveries(battle_id,sent_at) VALUES(?,?)').run(id, Date.now());
+  } catch (error) { console.error('Result post:', error); }
+  finally { delivering.delete(id); }
+}
+engine.on('resolved', battle => void deliverResult(battle.id));
 feed.start();
 setInterval(() => { engine.tick(Date.now(), feed.fresh()); for (const id of streams.keys()) broadcast(id); }, 1000);
 setInterval(() => { for (const [key, value] of sessions) if (value.expires < Date.now()) sessions.delete(key); }, 60000);
+setInterval(() => {
+  const rows = store.db.prepare("SELECT id FROM battles WHERE status IN ('finished','void') AND id NOT IN (SELECT battle_id FROM result_deliveries)").all() as { id: string }[];
+  for (const row of rows) void deliverResult(row.id);
+}, 5000);
 
 const publicDir = resolve('public');
 const server = createServer(async (req, res) => {
@@ -65,10 +80,16 @@ const server = createServer(async (req, res) => {
       if (req.headers['x-telegram-bot-api-secret-token'] !== webhookSecret) throw new GameError('Forbidden', 403);
       const update = await body(req) as any;
       if (!Number.isSafeInteger(update.update_id)) throw new GameError('Invalid update');
-      const inserted = store.db.prepare('INSERT OR IGNORE INTO processed_updates(update_id) VALUES(?)').run(update.update_id);
-      json(res, 200, { ok: true });
-      if (inserted.changes) void bot.handle(update).catch(error => console.error('Bot update:', error));
-      return;
+      const seen = store.db.prepare('SELECT 1 FROM processed_updates WHERE update_id=?').get(update.update_id);
+      if (!seen) {
+        let task = pendingUpdates.get(update.update_id);
+        if (!task) {
+          task = bot.handle(update).then(() => { store.db.prepare('INSERT OR IGNORE INTO processed_updates(update_id) VALUES(?)').run(update.update_id); });
+          pendingUpdates.set(update.update_id, task);
+        }
+        try { await task; } finally { pendingUpdates.delete(update.update_id); }
+      }
+      json(res, 200, { ok: true }); return;
     }
     if (req.method === 'GET' && (path === '/' || path === '/app.js' || path === '/style.css')) {
       const file = path === '/' ? 'index.html' : path.slice(1);
