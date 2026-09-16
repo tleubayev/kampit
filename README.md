@@ -9,8 +9,8 @@ One Node.js 24 TypeScript process serves the Telegram webhook, authenticated JSO
 ## Setup
 
 1. Create a Telegram bot in BotFather. Configure a Mini App with a short name and point it to the public HTTPS URL of this service.
-2. Copy `.env.example` to `.env` and fill in the values. `BOT_USERNAME` omits `@`. Generate a long random `WEBHOOK_SECRET`. Ensure the service can reach `api.telegram.org` and `api.exchange.coinbase.com`.
-3. On a Node.js 24 host, load the environment and run `npm start` (or `node src/server.ts`). No npm dependencies or build step are required. Mount persistent storage for `DATABASE_PATH`.
+2. Copy `.env.example` to `.env` and fill in the values. The server loads `.env` automatically when present; keep it out of version control. `BOT_USERNAME` omits `@`. Generate a long random `WEBHOOK_SECRET`. Ensure the service can reach `api.telegram.org` and `api.exchange.coinbase.com`.
+3. On a Node.js 24 host, run `npm start` (or `node src/server.ts`). No npm dependencies or build step are required. Mount persistent storage for `DATABASE_PATH`.
 4. The service registers its webhook and commands at startup. Add the bot to a Telegram group and send `/battle`. Use `/leaderboard`, `/stats`, and `/help` in the group.
 
 The group button uses `https://t.me/BOT_USERNAME/MINI_APP_SHORT_NAME?startapp=BATTLE_ID`. Telegram's group inline `web_app` button is private-chat only, so this direct Mini App link is required. The app validates Telegram `initData` server-side, exchanges it for an HttpOnly session cookie, and keeps the battle identifier separate from identity. Open the link inside Telegram; ordinary browser visits cannot join.
