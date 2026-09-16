@@ -48,6 +48,7 @@ function render(data) {
   el('content').innerHTML=html;
   el('playerCount').textContent=`${data.players.length} joined`;
   el('players').innerHTML=data.players.length?data.players.map(p=>`<div class="row"><span>${safe(p.name)} ${p.user_id===String(user.id)?'· YOU':''}</span><small class="${p.prediction==='LONG'?'green':p.prediction==='SHORT'?'red':''}">${p.prediction|| (p.ready?'READY':'JOINED')}</small></div>`).join(''):'<div class="empty">Waiting for players</div>';
+  el('myStats').innerHTML=data.me?`<div><strong>${data.me.wins}</strong><small>WINS</small></div><div><strong>${data.me.losses}</strong><small>LOSSES</small></div><div><strong>${data.me.streak}</strong><small>STREAK</small></div><div><strong>${data.me.xp}</strong><small>XP</small></div>`:'<div class="empty">Play a round to record your stats.</div>';
   el('leaderboard').innerHTML=data.leaderboard.length?data.leaderboard.slice(0,5).map((p,i)=>`<div class="row"><span>${i+1}. ${safe(p.name)}</span><small>${p.xp} XP · ${p.wins}W</small></div>`).join(''):'<div class="empty">First result starts the leaderboard</div>';
 }
 async function boot(){
