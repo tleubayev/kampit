@@ -12,7 +12,7 @@ export function verifyInitData(raw: string, botToken: string, nowSeconds = Math.
     throw new Error('Expired or invalid Telegram authentication');
   }
   const check = [...params.entries()].filter(([key]) => key !== 'hash' && key !== 'signature')
-    .sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join('\n');
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, value]) => `${key}=${value}`).join('\n');
   const secret = createHmac('sha256', 'WebAppData').update(botToken).digest();
   const expected = createHmac('sha256', secret).update(check).digest();
   const received = Buffer.from(supplied, 'hex');
