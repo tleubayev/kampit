@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { loadEnvFile } from 'node:process';
 import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { Store } from './store.ts';
@@ -8,6 +10,7 @@ import { CoinbasePriceFeed } from './price.ts';
 import { verifyInitData, type TelegramIdentity } from './auth.ts';
 import { Bot } from './bot.ts';
 
+if (existsSync('.env')) loadEnvFile('.env');
 const token = process.env.BOT_TOKEN || '';
 const username = process.env.BOT_USERNAME || '';
 const shortName = process.env.MINI_APP_SHORT_NAME || '';
