@@ -8,5 +8,4 @@ COPY --chmod=755 entrypoint.sh /entrypoint.sh
 ENV NODE_ENV=production PORT=3000 DATABASE_PATH=/data/battle.sqlite
 RUN mkdir -p /data
 EXPOSE 3000
-VOLUME ["/data"]
 ENTRYPOINT ["/entrypoint.sh"]
