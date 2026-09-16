@@ -40,3 +40,7 @@ Build with `docker build -t sol-quick-battle .`, then run the container behind H
 The service can run on one Railway service with a volume. Deploy the repository's Dockerfile (or upload the local project with `railway up`), keep one replica and Serverless disabled, attach a volume at `/data`, and generate a public domain. Set `DATABASE_PATH=/data/battle.sqlite`, `BOT_USERNAME=Kampit_robot`, `MINI_APP_SHORT_NAME=play`, `APP_URL=https://<generated-domain>`, plus `BOT_TOKEN` and a random `WEBHOOK_SECRET` as service variables. Set the healthcheck path to `/health`. Configure the named Mini App `play` in BotFather with the same HTTPS origin; then restart the service so it registers the webhook.
 
 Railway's trial and Free plan have usage limits; monitor usage before relying on the bot for ongoing play. The CLI respects `.gitignore`, and `.railwayignore` independently excludes the local token file from uploads.
+
+### Current Railway project
+
+[Service dashboard](https://railway.com/project/bded0c78-9ce7-44ce-926b-a3eedc83ade2) · [HTTPS app](https://sol-quick-battle-production.up.railway.app). This deployment was uploaded with the Railway CLI; GitHub autodeploy is not connected. Run `railway up` from this local project for later releases. In BotFather, create a named Mini App for `@Kampit_robot` with short name `play` and the HTTPS app URL before inviting a group to play.
