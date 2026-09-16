@@ -13,6 +13,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS battles (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, countdown_at INTEGER, start_at INTEGER, lock_at INTEGER, end_at INTEGER, start_price REAL, end_price REAL, outcome TEXT, message_id INTEGER, parent_id TEXT UNIQUE, successor_id TEXT);
       CREATE INDEX IF NOT EXISTS battles_chat ON battles(chat_id, created_at DESC);
       CREATE TABLE IF NOT EXISTS players (battle_id TEXT NOT NULL REFERENCES battles(id), user_id TEXT NOT NULL, name TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0, prediction TEXT, PRIMARY KEY(battle_id,user_id));
+      CREATE TABLE IF NOT EXISTS result_deliveries (battle_id TEXT PRIMARY KEY REFERENCES battles(id), sent_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS stats (chat_id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, ties INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0, xp INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(chat_id,user_id));`);
   }
   get(id: string) { return this.db.prepare('SELECT * FROM battles WHERE id=?').get(id) as Battle | undefined; }
