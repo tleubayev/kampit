@@ -79,6 +79,16 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', appUrl);
     const path = url.pathname;
     if (req.method === 'GET' && path === '/health') { json(res, 200, { ok: true, priceFresh: !!feed.fresh() }); return; }
+    if (req.method === 'GET' && path === '/admin/metrics') {
+      if (req.headers.authorization !== `Bearer ${webhookSecret}`) throw new GameError('Forbidden', 403);
+      const count = (sql: string) => (store.db.prepare(sql).get() as { count: number }).count;
+      json(res, 200, {
+        uniquePlayers: count('SELECT COUNT(DISTINCT user_id) AS count FROM players'),
+        groups: count('SELECT COUNT(DISTINCT chat_id) AS count FROM battles'),
+        battles: count('SELECT COUNT(*) AS count FROM battles'),
+        completedBattles: count("SELECT COUNT(*) AS count FROM battles WHERE status = 'finished'"),
+      }); return;
+    }
     if (req.method === 'POST' && path === '/telegram/webhook') {
       if (req.headers['x-telegram-bot-api-secret-token'] !== webhookSecret) throw new GameError('Forbidden', 403);
       const update = await body(req) as any;
