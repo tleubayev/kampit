@@ -38,7 +38,7 @@ export class Bot {
   async card(battle: Battle) {
     const sent = await this.call('sendMessage', {
       chat_id: battle.chat_id,
-      text: `⚔️ SOL QUICK BATTLE · ${battle.stake} XP STAKE\n\nReady up to lock ${battle.stake} XP. Predict SOL/USD over 60 seconds. Winning picks split the pool; a tie refunds everyone. Virtual XP only.`,
+      text: `⚔️ SOL QUICK BATTLE · ${battle.stake} XP STAKE\n\nReady up to lock ${battle.stake} XP. Predict SOL/USD over 60 seconds. Winning picks split the pool. If the price stays the same, the house wins and all staked XP is burned. Virtual XP only.`,
       reply_markup: { inline_keyboard: [[{ text: '⚔️ JOIN BATTLE', url: this.link(battle.id) }]] }
     });
     this.engine.store.db.prepare('UPDATE battles SET message_id=? WHERE id=?').run(sent.message_id, battle.id);
@@ -49,7 +49,7 @@ export class Bot {
     const pool = players.filter(p => p.ready).length * battle.stake;
     const text = battle.status === 'void'
       ? '⚠️ SOL QUICK BATTLE VOID\nAll staked XP was refunded.'
-      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${battle.outcome} WINS`}\n\nSOL/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `Winners split ${pool} XP: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
+      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${battle.outcome} WINS`}\n\nSOL/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${pool} staked XP burned.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `Winners split ${pool} XP: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
     await this.call('sendMessage', { chat_id: battle.chat_id, text,
       reply_markup: { inline_keyboard: [[{ text: 'VIEW RESULT / REMATCH', url: this.link(battle.id) }]] } });
   }
@@ -99,7 +99,7 @@ export class Bot {
       this.engine.store.ensureAccount(String(message.from.id), message.from.first_name);
       await this.call('sendMessage', { chat_id: chatId, text: `${awarded ? 'Invitation accepted. ' : ''}You have 1000 starting XP. Add me to a group and send /battle to choose a stake and play.` });
     } else if (command === '/help') {
-      await this.call('sendMessage', { chat_id: chatId, text: 'Add this bot to a group and send /battle to choose a stake of at least 10 XP. Two or more players join and ready up. Pick LONG or SHORT in the first 10 seconds of a 60-second SOL/USD round. Winners split the pool. Ties refund stakes. Every account receives 100 XP daily at 00:00 UTC.' });
+      await this.call('sendMessage', { chat_id: chatId, text: 'Add this bot to a group and send /battle to choose a stake of at least 10 XP. Two or more players join and ready up. Pick LONG or SHORT in the first 10 seconds of a 60-second SOL/USD round. Winners split the pool. If the price stays the same, the house wins and all staked XP is burned. Every account receives 100 XP daily at 00:00 UTC.' });
     }
   }
   async startBattle(message: TgMessage, creator: TgUser, stake: number) {
