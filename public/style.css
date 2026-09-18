@@ -22,7 +22,7 @@ header { min-height: 30px; gap: 10px; }
 .brand { justify-content: flex-start; gap: 7px; min-width: 0; }
 .brand strong { font-size: 13px; letter-spacing: .13em; white-space: nowrap; }
 .bolt { display: inline-grid; place-items: center; width: 16px; height: 16px; font-size: 15px; line-height: 1; }
-.headerBalance { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.headerBalance { padding: 7px 11px; border-radius: 999px; background: linear-gradient(100deg, #a693ff, #73d8d2); color: #07101e; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hero, .clock, .panel, .content {
   border: 1px solid var(--line);
   border-radius: 18px;
