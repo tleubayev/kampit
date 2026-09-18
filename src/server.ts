@@ -114,10 +114,10 @@ const server = createServer(async (req, res) => {
       }
       json(res, 200, { ok: true }); return;
     }
-    if (req.method === 'GET' && (path === '/' || path === '/app.js' || path === '/style.css')) {
+    if (req.method === 'GET' && (path === '/' || path === '/app.js' || path === '/style.css' || path === '/kampit-logo.svg')) {
       const file = path === '/' ? 'index.html' : path.slice(1);
       const content = await readFile(resolve(publicDir, file));
-      res.writeHead(200, { 'content-type': file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' }); res.end(content); return;
+      res.writeHead(200, { 'content-type': file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.svg') ? 'image/svg+xml' : 'text/css; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' }); res.end(content); return;
     }
     if (req.method === 'POST' && path === '/api/session') {
       const data = await body(req);
