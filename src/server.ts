@@ -19,7 +19,8 @@ const webhookSecret = process.env.WEBHOOK_SECRET || '';
 if (!token || !username || !shortName || !appUrl || !webhookSecret || webhookSecret.length < 16) {
   console.error('Set BOT_TOKEN, BOT_USERNAME, MINI_APP_SHORT_NAME, APP_URL and WEBHOOK_SECRET (16+ chars).'); process.exit(1);
 }
-const store = new Store(process.env.DATABASE_PATH || './battle.sqlite');
+const store = new Store(process.env.DATABASE_PATH || './battle.sqlite', 'UTC');
+store.grantDaily();
 store.db.exec('CREATE TABLE IF NOT EXISTS processed_updates (update_id INTEGER PRIMARY KEY);');
 const engine = new Engine(store);
 const feed = new CoinbasePriceFeed();
@@ -47,7 +48,7 @@ function view(id: string, userId: string) {
   const data = engine.snapshot(id);
   const now = Date.now();
   return { ...data, players: data.players.map(p => ({ ...p, prediction: data.battle.status === 'live' && now < data.battle.lock_at! && p.user_id !== userId ? null : p.prediction })),
-    me: store.stats(data.battle.chat_id, userId), quote: feed.fresh(now), chart: feed.history, serverNow: now };
+    me: store.stats(data.battle.chat_id, userId), account: store.account(userId), quote: feed.fresh(now), chart: feed.history, serverNow: now };
 }
 function broadcast(id: string) {
   for (const client of streams.get(id) || []) {
@@ -66,6 +67,12 @@ async function deliverResult(id: string) {
 }
 engine.on('resolved', battle => void deliverResult(battle.id));
 feed.start();
+function scheduleDaily() {
+  const now = Date.now();
+  const nextMidnight = Math.floor(now / 86400000) * 86400000 + 86400000;
+  setTimeout(() => { store.grantDaily(); for (const id of streams.keys()) broadcast(id); scheduleDaily(); }, nextMidnight - now);
+}
+scheduleDaily();
 setInterval(() => { engine.tick(Date.now(), feed.fresh()); for (const id of streams.keys()) broadcast(id); }, 1000);
 setInterval(() => { for (const [key, value] of sessions) if (value.expires < Date.now()) sessions.delete(key); }, 60000);
 setInterval(() => {
@@ -84,6 +91,9 @@ const server = createServer(async (req, res) => {
       const count = (sql: string) => (store.db.prepare(sql).get() as { count: number }).count;
       json(res, 200, {
         uniquePlayers: count('SELECT COUNT(DISTINCT user_id) AS count FROM players'),
+        accounts: count('SELECT COUNT(*) AS count FROM accounts'),
+        totalBalance: count('SELECT COALESCE(SUM(balance),0) AS count FROM accounts'),
+        groupNetXp: count('SELECT COALESCE(SUM(xp),0) AS count FROM stats'),
         groups: count('SELECT COUNT(DISTINCT chat_id) AS count FROM battles'),
         battles: count('SELECT COUNT(*) AS count FROM battles'),
         completedBattles: count("SELECT COUNT(*) AS count FROM battles WHERE status = 'finished'"),
@@ -112,6 +122,8 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && path === '/api/session') {
       const data = await body(req);
       const verified = verifyInitData(String(data.initData || ''), token);
+      const userId = String(verified.user.id);
+      store.ensureAccount(userId, [verified.user.first_name, verified.user.last_name].filter(Boolean).join(' '));
       const key = randomBytes(32).toString('hex');
       sessions.set(key, { identity: verified, expires: Date.now() + 86400000 });
       res.setHeader('set-cookie', `session=${key}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400${appUrl.startsWith('https:') ? '; Secure' : ''}`);
@@ -120,6 +132,11 @@ const server = createServer(async (req, res) => {
     if (path.startsWith('/api/')) {
       if (req.method === 'POST' && req.headers.origin && req.headers.origin !== new URL(appUrl).origin) throw new GameError('Wrong origin', 403);
       const actor = identity(req);
+      if (req.method === 'GET' && path === '/api/me') {
+        const account = store.account(String(actor.user.id))!;
+        const referralCount = (store.db.prepare('SELECT COUNT(*) AS count FROM accounts WHERE referred_by=?').get(account.user_id) as { count: number }).count;
+        json(res, 200, { account, referralCount, referralLink: `https://t.me/${username}?start=ref_${account.referral_code}` }); return;
+      }
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);
       const id = parts[2];
