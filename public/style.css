@@ -74,6 +74,7 @@ button:disabled { opacity: .5; cursor: default; }
 .result { font-size: 26px !important; }
 .result.long { color: var(--green); }
 .result.short { color: var(--red); }
+.result.house { color: var(--purple); }
 footer { text-align: center; color: #6c7a94; font-size: 11px; margin-top: 20px; }
 .statsGrid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; text-align: center; }
 .statsGrid strong { display: block; font-size: 21px; }
