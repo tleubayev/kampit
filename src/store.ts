@@ -77,6 +77,19 @@ export class Store {
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
+  migrateChat(oldId: string, newId: string) {
+    if (oldId === newId) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const rows = this.db.prepare('SELECT * FROM stats WHERE chat_id=?').all(oldId) as { user_id: string; name: string; wins: number; losses: number; ties: number; streak: number; xp: number }[];
+      const merge = this.db.prepare(`INSERT INTO stats(chat_id,user_id,name,wins,losses,ties,streak,xp) VALUES(?,?,?,?,?,?,?,?)
+        ON CONFLICT(chat_id,user_id) DO UPDATE SET wins=stats.wins+excluded.wins,losses=stats.losses+excluded.losses,ties=stats.ties+excluded.ties,streak=MAX(stats.streak,excluded.streak),xp=stats.xp+excluded.xp`);
+      for (const row of rows) merge.run(newId, row.user_id, row.name, row.wins, row.losses, row.ties, row.streak, row.xp);
+      this.db.prepare('DELETE FROM stats WHERE chat_id=?').run(oldId);
+      this.db.prepare('UPDATE battles SET chat_id=? WHERE chat_id=?').run(newId, oldId);
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
   get(id: string) { return this.db.prepare('SELECT * FROM battles WHERE id=?').get(id) as Battle | undefined; }
   players(id: string) { return this.db.prepare('SELECT * FROM players WHERE battle_id=? ORDER BY rowid').all(id) as Player[]; }
   active(chatId: string) { return this.db.prepare("SELECT * FROM battles WHERE chat_id=? AND status IN ('lobby','countdown','live') ORDER BY created_at DESC LIMIT 1").get(chatId) as Battle | undefined; }
