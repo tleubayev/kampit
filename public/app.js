@@ -50,7 +50,7 @@ function render(data) {
   drawChart(data.chart,b.start_price);
   const mine=data.players.find(p=>p.user_id===String(user.id));
   let html='';
-  if(b.status==='lobby') html=`<h1>Join the battle</h1><p>Stake ${b.stake} XP when you ready up. Winners split the pool; ties refund everyone. Two players minimum.</p>${!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">STAKE XP · I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>'}`;
+  if(b.status==='lobby') html=`<h1>Join the battle</h1><p>Stake ${b.stake} XP when you ready up. Winners split the pool; ties refund everyone. Two players minimum.</p>${!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>'}`;
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {
     const locked=now>=b.lock_at;
