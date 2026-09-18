@@ -1,6 +1,14 @@
 # SOL Quick Battle
 
-A Telegram group game with one mode: synchronized 60-second SOL/USD rounds. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. Winners earn 100 virtual XP; ties earn 25 XP. No wallet or money flow.
+A Telegram group game with one mode: synchronized 60-second SOL/USD rounds. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. Rooms have a creator-selected virtual XP stake of at least 10. There are no deposits, real-money stakes, or prizes.
+
+## XP rules
+
+- Each new account starts with 1,000 XP. The September 2026 migration reset existing group XP totals to zero and gave every existing player 1,000 XP. Historical wins and losses remain; the old totals are saved in `stats_before_xp_reset`.
+- Existing accounts receive 100 XP at 00:00 UTC each day. If the service is down at midnight, it catches up after restart. Newly created accounts receive their first daily credit at the next midnight.
+- A player reserves the room stake when they press **I'm ready**. Winning picks split the entire pool equally; leftover indivisible XP goes to winners in join order. Ties, void rounds, and rounds with no winning picks refund all stakes. An unpicked player forfeits their stake when there is a winning side.
+- A user can share their personal referral link from the Mini App or with `/referral` in a private chat. The inviter receives 100 XP once when a new Telegram user starts the bot through that link. Existing users and self-referrals do not award XP.
+- The group leaderboard's XP value is each player's net stake result in that group. The Mini App also shows their global spendable XP balance.
 
 ## Architecture
 
@@ -11,7 +19,7 @@ One Node.js 24 TypeScript process serves the Telegram webhook, authenticated JSO
 1. Create a Telegram bot in BotFather. Configure a Mini App with a short name and point it to the public HTTPS URL of this service.
 2. Copy `.env.example` to `.env` and fill in the values. The server loads `.env` automatically when present; keep it out of version control. `BOT_USERNAME` omits `@`. Generate a long random `WEBHOOK_SECRET`. Ensure the service can reach `api.telegram.org` and `api.exchange.coinbase.com`.
 3. On a Node.js 24 host, run `npm start` (or `node src/server.ts`). No npm dependencies or build step are required. Mount persistent storage for `DATABASE_PATH`.
-4. The service registers its webhook and commands at startup. Add the bot to a Telegram group and send `/battle`. Use `/leaderboard`, `/stats`, and `/help` in the group.
+4. The service registers its webhook and commands at startup. Add the bot to a Telegram group and send `/battle` to choose a stake, or `/battle 25` to set one directly. The creator can use `/cancel` before the countdown; unused lobbies expire and refund after 15 minutes. Use `/leaderboard`, `/stats`, and `/help` in the group.
 
 The group button uses `https://t.me/BOT_USERNAME/MINI_APP_SHORT_NAME?startapp=BATTLE_ID`. Telegram's group inline `web_app` button is private-chat only, so this direct Mini App link is required. The app validates Telegram `initData` server-side, exchanges it for an HttpOnly session cookie, and keeps the battle identifier separate from identity. Open the link inside Telegram; ordinary browser visits cannot join.
 
@@ -29,7 +37,7 @@ The group button uses `https://t.me/BOT_USERNAME/MINI_APP_SHORT_NAME?startapp=BA
 
 ## Test
 
-Run `npm test` on Node.js 24. Tests cover Telegram auth, lobby readiness, countdown, pick locking, resolution, XP, rematch idempotency and feed outage handling.
+Run `npm test` on Node.js 24. Tests cover Telegram auth, stake reservation and payouts, refunds, referral credit, UTC daily grants, legacy XP migration, rematches, and feed outage handling.
 
 ## Deployment
 
@@ -43,4 +51,4 @@ Railway's trial and Free plan have usage limits; monitor usage before relying on
 
 ### Current Railway project
 
-[Service dashboard](https://railway.com/project/bded0c78-9ce7-44ce-926b-a3eedc83ade2) · [HTTPS app](https://sol-quick-battle-production.up.railway.app). This deployment was uploaded with the Railway CLI; GitHub autodeploy is not connected. Run `railway up` from this local project for later releases. In BotFather, create a named Mini App for `@Kampit_robot` with short name `play` and the HTTPS app URL before inviting a group to play.
+[Service dashboard](https://railway.com/project/bded0c78-9ce7-44ce-926b-a3eedc83ade2) · [HTTPS app](https://sol-quick-battle-production.up.railway.app). This deployment was uploaded with the Railway CLI; GitHub autodeploy is not connected. Run `railway up` from this local project for later releases. The named Mini App `play` belongs to `@Kampit_robot` and uses the HTTPS app URL.
