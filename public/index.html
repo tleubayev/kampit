@@ -2,11 +2,13 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0b1020"><title>SOL Quick Battle</title><link rel="stylesheet" href="/style.css"><script src="https://telegram.org/js/telegram-web-app.js"></script><script src="/app.js" defer></script></head>
 <body><main class="shell">
   <header><div class="brand"><span class="bolt">⚡</span><div><strong>QUICK BATTLE</strong><small>SOL / USD</small></div></div><span id="phase" class="pill">CONNECTING</span></header>
+  <section class="panel wallet"><div class="panelHead"><h2>YOUR XP BALANCE</h2><span>+100 DAILY · 00:00 UTC</span></div><div id="balance" class="balance">—</div><div id="stake" class="small"></div></section>
   <section class="hero"><div class="eyebrow">SOLANA · LIVE MARKET</div><div id="price" class="price">—</div><div id="delta" class="delta">Waiting for price feed</div><canvas id="chart" width="600" height="190" aria-label="SOL/USD recent price chart"></canvas><div class="chartFooter"><span>LIVE SOL/USD</span><span id="feedTime">—</span></div></section>
   <section class="clock"><div><div class="eyebrow" id="clockLabel">BATTLE STATUS</div><div id="timer" class="timer">—</div></div><div class="priceBox"><span>START PRICE</span><strong id="startPrice">—</strong></div></section>
   <section id="content" class="content"><p>Connecting to Telegram…</p></section>
-  <section class="panel"><div class="panelHead"><h2>PLAYERS</h2><span id="playerCount">0 joined</span></div><div id="players" class="players"></div></section>
-  <section class="panel"><div class="panelHead"><h2>YOUR GROUP STATS</h2><span>VIRTUAL XP</span></div><div id="myStats" class="statsGrid"></div></section>
-  <section class="panel"><div class="panelHead"><h2>GROUP LEADERBOARD</h2><span>VIRTUAL XP</span></div><div id="leaderboard" class="leaderboard"></div></section>
+  <section class="panel playersPanel"><div class="panelHead"><h2>PLAYERS</h2><span id="playerCount">0 joined</span></div><div id="players" class="players"></div></section>
+  <section class="panel statsPanel"><div class="panelHead"><h2>YOUR GROUP STATS</h2><span>NET XP</span></div><div id="myStats" class="statsGrid"></div></section>
+  <section class="panel leaderboardPanel"><div class="panelHead"><h2>GROUP LEADERBOARD</h2><span>NET XP</span></div><div id="leaderboard" class="leaderboard"></div></section>
+  <section class="panel invite"><div class="panelHead"><h2>INVITE FRIENDS</h2><span>+100 XP PER NEW FRIEND</span></div><p class="small">Share your link. You receive 100 XP when a new friend starts the bot.</p><button class="secondary" onclick="shareInvite()">SHARE INVITE LINK</button><div id="inviteLink" class="inviteLink"></div><div id="referralCount" class="small"></div></section>
   <footer>60-second rounds · 10-second pick window · virtual XP only</footer>
 </main></body></html>
