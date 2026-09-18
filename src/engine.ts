@@ -87,30 +87,29 @@ export class Engine extends EventEmitter {
   resolve(id: string, quote: Quote) {
     const battle = this.require(id);
     if (battle.status !== 'live' || quote.at < battle.end_at!) throw new GameError('Battle cannot be resolved yet');
-    const outcome: Side | 'TIE' = quote.price > battle.start_price! ? 'LONG' : quote.price < battle.start_price! ? 'SHORT' : 'TIE';
+    const outcome: Side | 'HOUSE' = quote.price > battle.start_price! ? 'LONG' : quote.price < battle.start_price! ? 'SHORT' : 'HOUSE';
     const players = this.store.players(id);
     const entrants = players.filter(p => p.ready);
     const winners = entrants.filter(p => p.prediction === outcome);
-    const refund = outcome === 'TIE' || winners.length === 0;
+    const refund = outcome !== 'HOUSE' && winners.length === 0;
     const pool = entrants.length * battle.stake;
     const shares = new Map<string, number>();
     if (refund) for (const p of entrants) shares.set(p.user_id, battle.stake);
-    else winners.forEach((p, i) => shares.set(p.user_id, Math.floor(pool / winners.length) + (i < pool % winners.length ? 1 : 0)));
+    else if (outcome !== 'HOUSE') winners.forEach((p, i) => shares.set(p.user_id, Math.floor(pool / winners.length) + (i < pool % winners.length ? 1 : 0)));
     this.store.db.exec('BEGIN IMMEDIATE');
     try {
       this.store.db.prepare("UPDATE battles SET status='finished',end_at=?,end_price=?,outcome=? WHERE id=? AND status='live'")
         .run(quote.at, quote.price, outcome, id);
-      for (const player of players) {
+      for (const player of entrants) {
         const payout = shares.get(player.user_id) || 0;
         if (payout) this.store.db.prepare('UPDATE accounts SET balance=balance+? WHERE user_id=?').run(payout, player.user_id);
         if (!player.prediction && refund) continue;
-        const win = outcome !== 'TIE' && player.prediction === outcome;
-        const tie = outcome === 'TIE';
-        const loss = !win && !tie;
+        const win = player.prediction === outcome;
+        const loss = !win;
         const xp = payout - (player.ready ? battle.stake : 0);
         this.store.db.prepare(`INSERT INTO stats(chat_id,user_id,name,wins,losses,ties,streak,xp) VALUES(?,?,?,?,?,?,?,?)
           ON CONFLICT(chat_id,user_id) DO UPDATE SET name=excluded.name,wins=wins+excluded.wins,losses=losses+excluded.losses,ties=ties+excluded.ties,streak=CASE WHEN excluded.wins=1 THEN streak+1 ELSE 0 END,xp=xp+excluded.xp`)
-          .run(battle.chat_id, player.user_id, player.name, win ? 1 : 0, loss ? 1 : 0, tie ? 1 : 0, win ? 1 : 0, xp);
+          .run(battle.chat_id, player.user_id, player.name, win ? 1 : 0, loss ? 1 : 0, 0, win ? 1 : 0, xp);
       }
       this.store.db.exec('COMMIT');
     } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
