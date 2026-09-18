@@ -41,14 +41,12 @@ window.shareInvite=()=>{
 function render(data) {
   if(data.serverNow !== lastServerNow){serverOffset=data.serverNow-Date.now();lastServerNow=data.serverNow;}state=data; const b=data.battle, now=Date.now()+serverOffset, remaining= b.status==='countdown'?Math.max(0,b.countdown_at-now):b.status==='live'?Math.max(0,b.end_at-now):0;
   el('balance').textContent=`${data.account.balance} XP`;
-  el('stake').textContent=`ROOM STAKE · ${b.stake} XP per player`;
-  el('phase').textContent=b.status.toUpperCase();el('price').textContent=money(data.quote?.price || b.end_price || b.start_price);el('startPrice').textContent=money(b.start_price);
+  el('price').textContent=money(data.quote?.price || b.end_price || b.start_price);el('startPrice').textContent=money(b.start_price);
   const change=b.start_price&&data.quote ? (data.quote.price/b.start_price-1)*100 : null;
   el('delta').textContent=change===null?'Waiting for market data':`${change>=0?'+':''}${change.toFixed(3)}% from round start`;
   el('delta').className='delta '+(change===null?'':change>=0?'green':'red');
   el('feedTime').textContent=data.quote?new Date(data.quote.at).toLocaleTimeString():'FEED PAUSED';
-  el('clockLabel').textContent=b.status==='countdown'?'STARTING IN':b.status==='live'?'ROUND ENDS IN':'BATTLE STATUS';
-  el('timer').textContent=b.status==='countdown'?String(Math.ceil(remaining/1000)):b.status==='live'?`00:${String(Math.ceil(remaining/1000)).padStart(2,'0')}`:b.status==='lobby'?'READY UP':'00:00';
+  el('timer').textContent=b.status==='countdown'?`STARTS IN ${Math.ceil(remaining/1000)}`:b.status==='live'?`00:${String(Math.ceil(remaining/1000)).padStart(2,'0')}`:b.status==='lobby'?'READY UP':b.status==='finished'?'FINISHED':'VOID';
   drawChart(data.chart,b.start_price);
   const mine=data.players.find(p=>p.user_id===String(user.id));
   let html='';
@@ -56,7 +54,7 @@ function render(data) {
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {
     const locked=now>=b.lock_at;
-    html=`<h1>${locked?'Picks are locked': 'Where will SOL finish?'}</h1><p>${mine?.prediction?`Your pick: ${mine.prediction}`:locked?'Watch the price until the finish.':'Choose in the first 10 seconds.'}</p><div class="choiceGrid"><button class="choice long ${mine?.prediction==='LONG'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'LONG'})"><b>↑</b>LONG</button><button class="choice short ${mine?.prediction==='SHORT'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'SHORT'})"><b>↓</b>SHORT</button></div><div class="small">${locked?'Prediction window closed':`Picks lock in ${Math.max(0,Math.ceil((b.lock_at-now)/1000))}s`}</div>`;
+    html=`<h1>${locked?'Picks are locked': 'Where will SOL finish?'}</h1><p>${mine?.prediction?`Your pick: ${mine.prediction}`:locked?'Watch the price until the finish.':'Choose in the first 10 seconds.'} · ${b.stake} XP stake</p><div class="choiceGrid"><button class="choice long ${mine?.prediction==='LONG'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'LONG'})"><b>↑</b>LONG</button><button class="choice short ${mine?.prediction==='SHORT'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'SHORT'})"><b>↓</b>SHORT</button></div><div class="small">${locked?'Prediction window closed':`Picks lock in ${Math.max(0,Math.ceil((b.lock_at-now)/1000))}s`}</div>`;
   } else html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${b.outcome} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${mine.prediction}`:'No pick'}. ${b.outcome==='TIE'?'All stakes refunded.':'Winners split the XP pool.'}`}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${b.stake||10} XP</button>`;
   el('content').innerHTML=html;
   el('playerCount').textContent=`${data.players.length} joined`;
@@ -72,12 +70,12 @@ async function boot(){
     showAccount(await api('/api/me'));
     setInterval(async()=>{try{showAccount(await api('/api/me'));}catch{}},30000);
     battleId=session.startParam||startParam;
-    if(!battleId) { document.body.classList.add('home'); el('phase').textContent='HOME'; el('content').innerHTML='<h1>Ready to play?</h1><p>Add the bot to a group and send /battle to choose a stake. Share your invite link below for 100 XP per new friend.</p>'; return; }
+    if(!battleId) { document.body.classList.add('home'); el('content').innerHTML='<h1>Ready to play?</h1><p>Add the bot to a group and send /battle to choose a stake. Share your invite link below for 100 XP per new friend.</p>'; return; }
     if(!/^[a-f0-9]{16}$/.test(battleId))throw new Error('Open a battle link from your Telegram group.');
     render(await api(`/api/battles/${battleId}`));
     stream=new EventSource(`/api/battles/${battleId}/events`);
     stream.onmessage=event=>render(JSON.parse(event.data));
-    stream.onerror=()=>{el('phase').textContent='RECONNECTING';};
+    stream.onerror=()=>{el('feedTime').textContent='RECONNECTING';};
     setInterval(()=>{if(state)render(state);},250);
   } catch(error){el('content').innerHTML=`<h1>Cannot open battle</h1><p>${safe(error.message)}</p>`;}
 }
