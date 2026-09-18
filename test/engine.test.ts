@@ -34,27 +34,32 @@ test('stake is fixed, reserved on ready, and winners split the full pool', () =>
   store.close();
 });
 
-test('ties, no winning picks, and void rounds refund every stake', () => {
+test('flat-price rounds burn every stake; no winning picks and void rounds refund', () => {
   const { store, engine } = fixture();
   const first = engine.create('g', 50, '1', 1000);
   engine.join(first.id, '1', 'A'); engine.join(first.id, '2', 'B');
   engine.ready(first.id, '1', 1000); engine.ready(first.id, '2', 1000);
   engine.tick(4000, quote(100, 4000)); engine.predict(first.id, '1', 'LONG', 5000); engine.predict(first.id, '2', 'SHORT', 5000);
   engine.tick(64000, quote(100, 64000));
-  assert.equal(store.account('1')!.balance, 1000); assert.equal(store.account('2')!.balance, 1000);
+  assert.equal(engine.require(first.id).outcome, 'HOUSE');
+  assert.equal(store.account('1')!.balance, 950); assert.equal(store.account('2')!.balance, 950);
+  assert.equal((store.stats('g', '1') as { losses: number; xp: number }).losses, 1);
+  assert.equal((store.stats('g', '1') as { losses: number; xp: number }).xp, -50);
+  engine.tick(65000, quote(100, 65000));
+  assert.equal(store.account('1')!.balance, 950);
   const second = engine.rematch(first.id, '1', 65000);
   assert.equal(second.stake, 50); assert.equal(engine.rematch(first.id, '2', 65001).id, second.id);
   engine.join(second.id, '1', 'A'); engine.join(second.id, '2', 'B');
   engine.ready(second.id, '1', 66000); engine.ready(second.id, '2', 66000);
   engine.tick(69000, quote(100, 69000)); engine.predict(second.id, '1', 'LONG', 70000); engine.predict(second.id, '2', 'LONG', 70000);
   engine.tick(129000, quote(99, 129000));
-  assert.equal(store.account('1')!.balance, 1000); assert.equal(store.account('2')!.balance, 1000);
+  assert.equal(store.account('1')!.balance, 950); assert.equal(store.account('2')!.balance, 950);
   const third = engine.rematch(second.id, '1', 130000);
   engine.join(third.id, '1', 'A'); engine.join(third.id, '2', 'B');
   engine.ready(third.id, '1', 130000); engine.ready(third.id, '2', 130000);
   engine.tick(133000, quote(100, 133000)); engine.tick(208001, null);
   assert.equal(engine.require(third.id).status, 'void');
-  assert.equal(store.account('1')!.balance, 1000); assert.equal(store.account('2')!.balance, 1000);
+  assert.equal(store.account('1')!.balance, 950); assert.equal(store.account('2')!.balance, 950);
   store.close();
 });
 
