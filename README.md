@@ -51,4 +51,4 @@ Railway's trial and Free plan have usage limits; monitor usage before relying on
 
 ### Current Railway project
 
-[Service dashboard](https://railway.com/project/bded0c78-9ce7-44ce-926b-a3eedc83ade2) · [HTTPS app](https://sol-quick-battle-production.up.railway.app). This deployment was uploaded with the Railway CLI; GitHub autodeploy is not connected. Run `railway up` from this local project for later releases. The named Mini App `play` belongs to `@Kampit_robot` and uses the HTTPS app URL.
+[Service dashboard](https://railway.com/project/bded0c78-9ce7-44ce-926b-a3eedc83ade2) · [HTTPS app](https://kampit.up.railway.app). This deployment was uploaded with the Railway CLI; GitHub autodeploy is not connected. Run `railway up` from this local project for later releases. The named Mini App `play` belongs to `@Kampit_robot` and must use this HTTPS app URL in BotFather.
