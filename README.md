@@ -6,7 +6,7 @@ A Telegram group game with one mode: synchronized 60-second SOL/USD rounds. Play
 
 - Each new account starts with 1,000 XP. The September 2026 migration reset existing group XP totals to zero and gave every existing player 1,000 XP. Historical wins and losses remain; the old totals are saved in `stats_before_xp_reset`.
 - Existing accounts receive 100 XP at 00:00 UTC each day. If the service is down at midnight, it catches up after restart. Newly created accounts receive their first daily credit at the next midnight.
-- A player reserves the room stake when they press **I'm ready**. Winning picks split the entire pool equally; leftover indivisible XP goes to winners in join order. Ties, void rounds, and rounds with no winning picks refund all stakes. An unpicked player forfeits their stake when there is a winning side.
+- A player reserves the room stake when they press **I'm ready**. Winning picks split the entire pool equally; leftover indivisible XP goes to winners in join order. If the start and end prices are equal, the house wins and all staked XP is burned. Void rounds and rounds with no winning picks refund all stakes. An unpicked player forfeits their stake when there is a winning side.
 - A user can share their personal referral link from the Mini App or with `/referral` in a private chat. The inviter receives 100 XP once when a new Telegram user starts the bot through that link. Existing users and self-referrals do not award XP.
 - The group leaderboard's XP value is each player's net stake result in that group. The Mini App also shows their global spendable XP balance.
 
@@ -37,7 +37,7 @@ The group button uses `https://t.me/BOT_USERNAME/MINI_APP_SHORT_NAME?startapp=BA
 
 ## Test
 
-Run `npm test` on Node.js 24. Tests cover Telegram auth, stake reservation and payouts, refunds, referral credit, UTC daily grants, legacy XP migration, rematches, and feed outage handling.
+Run `npm test` on Node.js 24. Tests cover Telegram auth, stake reservation and payouts, flat-price stake burning, refunds, referral credit, UTC daily grants, legacy XP migration, rematches, and feed outage handling.
 
 ## Deployment
 
