@@ -2,7 +2,7 @@ import type { Engine } from './engine.ts';
 import type { Battle } from './store.ts';
 
 type TgUser = { id: number; first_name: string; last_name?: string };
-type TgMessage = { message_id: number; chat: { id: number; type: string }; from?: TgUser; text?: string };
+type TgMessage = { message_id: number; chat: { id: number; type: string }; from?: TgUser; text?: string; migrate_to_chat_id?: number; migrate_from_chat_id?: number };
 type Update = { update_id: number; message?: TgMessage; callback_query?: { id: string; from: TgUser; message?: TgMessage; data?: string } };
 
 export class Bot {
@@ -13,7 +13,14 @@ export class Bot {
     const response = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000)
     });
-    const result = await response.json() as { ok: boolean; result?: any; description?: string };
+    const result = await response.json() as { ok: boolean; result?: any; description?: string; parameters?: { migrate_to_chat_id?: number } };
+    if ((!response.ok || !result.ok) && result.parameters?.migrate_to_chat_id && body.chat_id != null) {
+      const nextId = String(result.parameters.migrate_to_chat_id);
+      if (nextId !== String(body.chat_id)) {
+        this.engine.store.migrateChat(String(body.chat_id), nextId);
+        return this.call(method, { ...body, chat_id: nextId });
+      }
+    }
     if (!response.ok || !result.ok) throw new Error(`Telegram ${method}: ${result.description || response.status}`);
     return result.result;
   }
@@ -55,6 +62,8 @@ export class Bot {
       return;
     }
     const message = update.message;
+    if (message?.migrate_to_chat_id) { this.engine.store.migrateChat(String(message.chat.id), String(message.migrate_to_chat_id)); return; }
+    if (message?.migrate_from_chat_id) { this.engine.store.migrateChat(String(message.migrate_from_chat_id), String(message.chat.id)); return; }
     if (!message?.text?.startsWith('/')) return;
     const command = message.text.trim().split(/\s+/)[0].split('@')[0].toLowerCase();
     const chatId = String(message.chat.id);
