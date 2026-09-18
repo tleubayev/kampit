@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 
 export type Status = 'lobby' | 'countdown' | 'live' | 'finished' | 'void';
 export type Side = 'LONG' | 'SHORT';
-export type Battle = { id: string; chat_id: string; status: Status; created_at: number; countdown_at: number | null; start_at: number | null; lock_at: number | null; end_at: number | null; start_price: number | null; end_price: number | null; outcome: Side | 'TIE' | null; message_id: number | null; parent_id: string | null; successor_id: string | null; stake: number; creator_user_id: string | null };
+export type Battle = { id: string; chat_id: string; status: Status; created_at: number; countdown_at: number | null; start_at: number | null; lock_at: number | null; end_at: number | null; start_price: number | null; end_price: number | null; outcome: Side | 'HOUSE' | 'TIE' | null; message_id: number | null; parent_id: string | null; successor_id: string | null; stake: number; creator_user_id: string | null };
 export type Player = { battle_id: string; user_id: string; name: string; ready: number; prediction: Side | null };
 export type Account = { user_id: string; name: string; balance: number; referral_code: string; referred_by: string | null; last_daily_date: string };
 
