@@ -113,3 +113,17 @@ test('legacy player XP resets once and each existing player gets a 1000 XP accou
     store.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('migrated Telegram groups keep their battles and merged leaderboard', () => {
+  const { store, engine } = fixture();
+  const battle = engine.create('-123', 10, '1', 1000);
+  store.db.prepare('INSERT INTO stats(chat_id,user_id,name,wins,losses,ties,streak,xp) VALUES(?,?,?,?,?,?,?,?)').run('-123', '1', 'Ali', 2, 1, 0, 1, 20);
+  store.db.prepare('INSERT INTO stats(chat_id,user_id,name,wins,losses,ties,streak,xp) VALUES(?,?,?,?,?,?,?,?)').run('-100456', '1', 'Ali', 1, 0, 0, 1, 10);
+  store.migrateChat('-123', '-100456');
+  store.migrateChat('-123', '-100456');
+  assert.equal(engine.require(battle.id).chat_id, '-100456');
+  assert.equal((store.stats('-100456', '1') as any).wins, 3);
+  assert.equal((store.stats('-100456', '1') as any).xp, 30);
+  assert.equal(store.stats('-123', '1'), undefined);
+  store.close();
+});
