@@ -9,6 +9,7 @@ import { Engine, GameError } from './engine.ts';
 import { CoinbasePriceFeed } from './price.ts';
 import { verifyInitData, type TelegramIdentity } from './auth.ts';
 import { Bot } from './bot.ts';
+import { SlidingWindowRateLimiter } from './rate-limit.ts';
 
 if (existsSync('.env')) loadEnvFile('.env');
 const token = process.env.BOT_TOKEN || '';
@@ -29,6 +30,14 @@ const sessions = new Map<string, { identity: TelegramIdentity; expires: number }
 const streams = new Map<string, Set<{ res: ServerResponse; userId: string }>>();
 const pendingUpdates = new Map<number, Promise<void>>();
 const delivering = new Set<string>();
+const apiLimiter = new SlidingWindowRateLimiter();
+const actionLimiter = new SlidingWindowRateLimiter();
+const sessionLimiter = new SlidingWindowRateLimiter();
+
+function enforceLimit(limiter: SlidingWindowRateLimiter, key: string, limit: number, windowMs = 60_000) {
+  const result = limiter.take(key, limit, windowMs);
+  if (!result.allowed) throw new GameError(`Too many requests. Try again in ${Math.ceil(result.retryAfterMs / 1000)} seconds.`, 429);
+}
 
 function json(res: ServerResponse, status: number, value: unknown) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value));
@@ -123,6 +132,7 @@ const server = createServer(async (req, res) => {
       const data = await body(req);
       const verified = verifyInitData(String(data.initData || ''), token);
       const userId = String(verified.user.id);
+      enforceLimit(sessionLimiter, userId, 10);
       store.ensureAccount(userId, [verified.user.first_name, verified.user.last_name].filter(Boolean).join(' '));
       const key = randomBytes(32).toString('hex');
       sessions.set(key, { identity: verified, expires: Date.now() + 86400000 });
@@ -132,6 +142,8 @@ const server = createServer(async (req, res) => {
     if (path.startsWith('/api/')) {
       if (req.method === 'POST' && req.headers.origin && req.headers.origin !== new URL(appUrl).origin) throw new GameError('Wrong origin', 403);
       const actor = identity(req);
+      const actorId = String(actor.user.id);
+      enforceLimit(apiLimiter, actorId, 60);
       if (req.method === 'GET' && path === '/api/me') {
         const account = store.account(String(actor.user.id))!;
         const referralCount = (store.db.prepare('SELECT COUNT(*) AS count FROM accounts WHERE referred_by=?').get(account.user_id) as { count: number }).count;
@@ -140,6 +152,7 @@ const server = createServer(async (req, res) => {
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);
       const id = parts[2];
+      if (req.method === 'POST') enforceLimit(actionLimiter, actorId, 10);
       if (req.method === 'GET' && parts.length === 3) { json(res, 200, view(id, String(actor.user.id))); return; }
       if (req.method === 'GET' && parts[3] === 'events') {
         engine.require(id);
@@ -170,7 +183,10 @@ const server = createServer(async (req, res) => {
   } catch (error) {
     const status = error instanceof GameError ? error.status : 500;
     if (status === 500) console.error(error);
-    if (!res.headersSent) json(res, status, { error: error instanceof Error ? error.message : 'Server error' }); else res.end();
+    if (!res.headersSent) {
+      if (status === 429) res.setHeader('retry-after', '60');
+      json(res, status, { error: error instanceof Error ? error.message : 'Server error' });
+    } else res.end();
   }
 });
 const port = Number(process.env.PORT || 3000);
