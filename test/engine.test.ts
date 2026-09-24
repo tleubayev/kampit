@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Store, dailyDate } from '../src/store.ts';
-import { Engine, GameError } from '../src/engine.ts';
+import { Engine, GameError, MAX_PLAYERS } from '../src/engine.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,22 @@ import { join } from 'node:path';
 
 function fixture() { const store = new Store(':memory:'); const engine = new Engine(store); return { store, engine }; }
 const quote = (price: number, at: number) => ({ price, at, sourceTime: '' });
+
+test('battle accepts 100 players and rejects the 101st', () => {
+  const { store, engine } = fixture();
+  const battle = engine.create('g', 10, '1', 1000);
+  for (let i = 1; i <= MAX_PLAYERS; i++) engine.join(battle.id, String(i), `Player ${i}`);
+  assert.equal(store.players(battle.id).length, 100);
+  assert.throws(() => engine.join(battle.id, '101', 'Player 101'), (error: unknown) => {
+    assert.equal((error as GameError).status, 409);
+    assert.match((error as Error).message, /full \(100 players\)/);
+    return true;
+  });
+  engine.join(battle.id, '100', 'Renamed Player');
+  assert.equal(store.players(battle.id).length, 100);
+  assert.equal(store.players(battle.id).at(-1)?.name, 'Renamed Player');
+  store.close();
+});
 
 test('stake is fixed, reserved on ready, and winners split the full pool', () => {
   const { store, engine } = fixture();
