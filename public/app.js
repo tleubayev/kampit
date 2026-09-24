@@ -2,7 +2,7 @@ const tg = window.Telegram?.WebApp;
 const el = id => document.getElementById(id);
 const money = value => Number.isFinite(value) ? `$${Number(value).toFixed(2)}` : '—';
 const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-let battleId, user, state, stream, accountInfo, requestBusy = false, serverOffset = 0, lastServerNow = 0;
+let battleId, state, stream, accountInfo, requestBusy = false, serverOffset = 0, lastServerNow = 0;
 const startParam = tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('tgWebAppStartParam');
 function drawChart(points, startPrice) {
   const canvas = el('chart'), ctx = canvas.getContext('2d');
@@ -48,10 +48,10 @@ function render(data) {
   el('feedTime').textContent=data.quote?new Date(data.quote.at).toLocaleTimeString():'FEED PAUSED';
   el('timer').textContent=b.status==='countdown'?`STARTS IN ${Math.ceil(remaining/1000)}`:b.status==='live'?`00:${String(Math.ceil(remaining/1000)).padStart(2,'0')}`:b.status==='lobby'&&b.lobby_deadline?`LOBBY 00:${String(Math.ceil(remaining/1000)).padStart(2,'0')}`:b.status==='lobby'?'READY UP':b.status==='finished'?'FINISHED':'VOID';
   drawChart(data.chart,b.start_price);
-  const mine=data.players.find(p=>p.user_id===String(user.id));
+  const mine=data.players.find(p=>p.isYou);
   let html='';
   if(b.status==='lobby') {
-    const readyCount=data.players.filter(p=>p.ready).length, creator=String(user.id)===String(b.creator_user_id);
+    const readyCount=data.players.filter(p=>p.ready).length, creator=b.isCreator;
     const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
     const start=creator&&readyCount>=2?'<button class="primary" onclick="doAction(\'start\')">START NOW</button>':'';
     html=`<h1>Join the battle</h1><p>Stake ${b.stake} XP when you ready up. The 30-second lobby timer begins with the first ready player. Unready players are excluded. ${readyCount} ready.</p>${action}${start}`;
@@ -63,7 +63,7 @@ function render(data) {
   } else html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${b.outcome} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${mine.prediction}`:'No pick'}. ${b.outcome==='HOUSE'?'All staked XP burned.':b.outcome==='TIE'?'All stakes refunded.':'Winners split the XP pool.'}`}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${b.stake||10} XP</button>`;
   el('content').innerHTML=html;
   el('playerCount').textContent=`${data.players.length} / 100 joined`;
-  el('players').innerHTML=data.players.length?data.players.map(p=>`<div class="row"><span>${safe(p.name)} ${p.user_id===String(user.id)?'· YOU':''}</span><small class="${p.prediction==='LONG'?'green':p.prediction==='SHORT'?'red':''}">${p.prediction|| (p.ready?'READY':'JOINED')}</small></div>`).join(''):'<div class="empty">Waiting for players</div>';
+  el('players').innerHTML=data.players.length?data.players.map(p=>`<div class="row"><span>${safe(p.name)} ${p.isYou?'· YOU':''}</span><small class="${p.prediction==='LONG'?'green':p.prediction==='SHORT'?'red':''}">${p.prediction|| (p.ready?'READY':'JOINED')}</small></div>`).join(''):'<div class="empty">Waiting for players</div>';
   el('myStats').innerHTML=data.me?`<div><strong>${data.me.wins}</strong><small>WINS</small></div><div><strong>${data.me.losses}</strong><small>LOSSES</small></div><div><strong>${data.me.streak}</strong><small>STREAK</small></div><div><strong>${data.me.xp}</strong><small>NET XP</small></div>`:'<div class="empty">Play a round to record your stats.</div>';
   el('leaderboard').innerHTML=data.leaderboard.length?data.leaderboard.slice(0,5).map((p,i)=>`<div class="row"><span>${i+1}. ${safe(p.name)}</span><small>${p.xp} XP · ${p.wins}W</small></div>`).join(''):'<div class="empty">First result starts the leaderboard</div>';
 }
@@ -71,7 +71,7 @@ async function boot(){
   tg?.ready();tg?.expand();
   if(!tg?.initData){el('content').innerHTML='<h1>Open in Telegram</h1><p>Use the Join Battle button in your group chat.</p>';return;}
   try {
-    const session=await api('/api/session','POST',{initData:tg.initData});user=session.user;
+    const session=await api('/api/session','POST',{initData:tg.initData});
     showAccount(await api('/api/me'));
     setInterval(async()=>{try{showAccount(await api('/api/me'));}catch{}},30000);
     battleId=session.startParam||startParam;
