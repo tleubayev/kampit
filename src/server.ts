@@ -10,6 +10,7 @@ import { CoinbasePriceFeed } from './price.ts';
 import { verifyInitData, type TelegramIdentity } from './auth.ts';
 import { Bot } from './bot.ts';
 import { SlidingWindowRateLimiter } from './rate-limit.ts';
+import { publicAccount, publicBattle, publicPlayers, publicStats } from './public-view.ts';
 
 if (existsSync('.env')) loadEnvFile('.env');
 const token = process.env.BOT_TOKEN || '';
@@ -56,8 +57,14 @@ async function body(req: IncomingMessage) {
 function view(id: string, userId: string) {
   const data = engine.snapshot(id);
   const now = Date.now();
-  return { ...data, players: data.players.map(p => ({ ...p, prediction: data.battle.status === 'live' && now < data.battle.lock_at! && p.user_id !== userId ? null : p.prediction })),
-    me: store.stats(data.battle.chat_id, userId), account: store.account(userId), quote: feed.fresh(now), chart: feed.history, serverNow: now };
+  return {
+    battle: publicBattle(data.battle, userId),
+    players: publicPlayers(data.players, data.battle, userId, now),
+    leaderboard: (data.leaderboard as any[]).map(row => publicStats(row)),
+    me: publicStats(store.stats(data.battle.chat_id, userId) as any),
+    account: publicAccount(store.account(userId)!),
+    quote: feed.fresh(now), chart: feed.history, serverNow: now,
+  };
 }
 function broadcast(id: string) {
   for (const client of streams.get(id) || []) {
@@ -137,7 +144,7 @@ const server = createServer(async (req, res) => {
       const key = randomBytes(32).toString('hex');
       sessions.set(key, { identity: verified, expires: Date.now() + 86400000 });
       res.setHeader('set-cookie', `session=${key}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400${appUrl.startsWith('https:') ? '; Secure' : ''}`);
-      json(res, 200, { user: verified.user, startParam: verified.startParam }); return;
+      json(res, 200, { startParam: verified.startParam }); return;
     }
     if (path.startsWith('/api/')) {
       if (req.method === 'POST' && req.headers.origin && req.headers.origin !== new URL(appUrl).origin) throw new GameError('Wrong origin', 403);
@@ -147,7 +154,7 @@ const server = createServer(async (req, res) => {
       if (req.method === 'GET' && path === '/api/me') {
         const account = store.account(String(actor.user.id))!;
         const referralCount = (store.db.prepare('SELECT COUNT(*) AS count FROM accounts WHERE referred_by=?').get(account.user_id) as { count: number }).count;
-        json(res, 200, { account, referralCount, referralLink: `https://t.me/${username}?start=ref_${account.referral_code}` }); return;
+        json(res, 200, { account: publicAccount(account), referralCount, referralLink: `https://t.me/${username}?start=ref_${account.referral_code}` }); return;
       }
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);
