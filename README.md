@@ -25,6 +25,8 @@ The process rate limits authenticated API traffic to 60 requests per user per mi
 
 The group button uses `https://t.me/BOT_USERNAME/MINI_APP_SHORT_NAME?startapp=BATTLE_ID`. Telegram's group inline `web_app` button is private-chat only, so this direct Mini App link is required. The app validates Telegram `initData` server-side, exchanges it for an HttpOnly session cookie, and keeps the battle identifier separate from identity. Open the link inside Telegram; ordinary browser visits cannot join.
 
+Public API and live-event responses expose `isYou` and `isCreator` flags instead of Telegram user IDs. Telegram user IDs, group chat IDs, referral ownership and database metadata remain server-side.
+
 ## Configuration
 
 | Variable | Purpose |
