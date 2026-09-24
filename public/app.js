@@ -39,18 +39,23 @@ window.shareInvite=()=>{
   if(tg?.openTelegramLink)tg.openTelegramLink(url);else window.open(url,'_blank');
 };
 function render(data) {
-  if(data.serverNow !== lastServerNow){serverOffset=data.serverNow-Date.now();lastServerNow=data.serverNow;}state=data; const b=data.battle, now=Date.now()+serverOffset, remaining= b.status==='countdown'?Math.max(0,b.countdown_at-now):b.status==='live'?Math.max(0,b.end_at-now):0;
+  if(data.serverNow !== lastServerNow){serverOffset=data.serverNow-Date.now();lastServerNow=data.serverNow;}state=data; const b=data.battle, now=Date.now()+serverOffset, remaining= b.status==='lobby'&&b.lobby_deadline?Math.max(0,b.lobby_deadline-now):b.status==='countdown'?Math.max(0,b.countdown_at-now):b.status==='live'?Math.max(0,b.end_at-now):0;
   el('balance').textContent=`${data.account.balance} XP`;
   el('price').textContent=money(data.quote?.price || b.end_price || b.start_price);el('startPrice').textContent=money(b.start_price);
   const change=b.start_price&&data.quote ? (data.quote.price/b.start_price-1)*100 : null;
   el('delta').textContent=change===null?'Waiting for market data':`${change>=0?'+':''}${change.toFixed(3)}% from round start`;
   el('delta').className='delta '+(change===null?'':change>=0?'green':'red');
   el('feedTime').textContent=data.quote?new Date(data.quote.at).toLocaleTimeString():'FEED PAUSED';
-  el('timer').textContent=b.status==='countdown'?`STARTS IN ${Math.ceil(remaining/1000)}`:b.status==='live'?`00:${String(Math.ceil(remaining/1000)).padStart(2,'0')}`:b.status==='lobby'?'READY UP':b.status==='finished'?'FINISHED':'VOID';
+  el('timer').textContent=b.status==='countdown'?`STARTS IN ${Math.ceil(remaining/1000)}`:b.status==='live'?`00:${String(Math.ceil(remaining/1000)).padStart(2,'0')}`:b.status==='lobby'&&b.lobby_deadline?`LOBBY 00:${String(Math.ceil(remaining/1000)).padStart(2,'0')}`:b.status==='lobby'?'READY UP':b.status==='finished'?'FINISHED':'VOID';
   drawChart(data.chart,b.start_price);
   const mine=data.players.find(p=>p.user_id===String(user.id));
   let html='';
-  if(b.status==='lobby') html=`<h1>Join the battle</h1><p>Stake ${b.stake} XP when you ready up. Winners split the pool. Same start and end price: house wins and all stakes burn. 2–100 players.</p>${!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>'}`;
+  if(b.status==='lobby') {
+    const readyCount=data.players.filter(p=>p.ready).length, creator=String(user.id)===String(b.creator_user_id);
+    const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
+    const start=creator&&readyCount>=2?'<button class="primary" onclick="doAction(\'start\')">START NOW</button>':'';
+    html=`<h1>Join the battle</h1><p>Stake ${b.stake} XP when you ready up. The 30-second lobby timer begins with the first ready player. Unready players are excluded. ${readyCount} ready.</p>${action}${start}`;
+  }
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {
     const locked=now>=b.lock_at;
