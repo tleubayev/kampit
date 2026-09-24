@@ -34,6 +34,7 @@ test('stake is fixed, reserved on ready, and winners split the full pool', () =>
   engine.ready(battle.id, '1', 1000); engine.ready(battle.id, '1', 1000);
   engine.ready(battle.id, '2', 1000); engine.ready(battle.id, '3', 1000);
   assert.equal(store.account('1')!.balance, 985);
+  engine.startNow(battle.id, '1', 1000);
   assert.equal(engine.require(battle.id).countdown_at, 4000);
   engine.tick(4000, quote(100, 4000));
   engine.predict(battle.id, '1', 'LONG', 5000); engine.predict(battle.id, '2', 'LONG', 5000); engine.predict(battle.id, '3', 'SHORT', 5000);
@@ -55,6 +56,7 @@ test('flat-price rounds burn every stake; no winning picks and void rounds refun
   const first = engine.create('g', 50, '1', 1000);
   engine.join(first.id, '1', 'A'); engine.join(first.id, '2', 'B');
   engine.ready(first.id, '1', 1000); engine.ready(first.id, '2', 1000);
+  engine.startNow(first.id, '1', 1000);
   engine.tick(4000, quote(100, 4000)); engine.predict(first.id, '1', 'LONG', 5000); engine.predict(first.id, '2', 'SHORT', 5000);
   engine.tick(64000, quote(100, 64000));
   assert.equal(engine.require(first.id).outcome, 'HOUSE');
@@ -67,12 +69,14 @@ test('flat-price rounds burn every stake; no winning picks and void rounds refun
   assert.equal(second.stake, 50); assert.equal(engine.rematch(first.id, '2', 65001).id, second.id);
   engine.join(second.id, '1', 'A'); engine.join(second.id, '2', 'B');
   engine.ready(second.id, '1', 66000); engine.ready(second.id, '2', 66000);
+  engine.startNow(second.id, '1', 66000);
   engine.tick(69000, quote(100, 69000)); engine.predict(second.id, '1', 'LONG', 70000); engine.predict(second.id, '2', 'LONG', 70000);
   engine.tick(129000, quote(99, 129000));
   assert.equal(store.account('1')!.balance, 950); assert.equal(store.account('2')!.balance, 950);
   const third = engine.rematch(second.id, '1', 130000);
   engine.join(third.id, '1', 'A'); engine.join(third.id, '2', 'B');
   engine.ready(third.id, '1', 130000); engine.ready(third.id, '2', 130000);
+  engine.startNow(third.id, '1', 130000);
   engine.tick(133000, quote(100, 133000)); engine.tick(208001, null);
   assert.equal(engine.require(third.id).status, 'void');
   assert.equal(store.account('1')!.balance, 950); assert.equal(store.account('2')!.balance, 950);
@@ -109,6 +113,52 @@ test('insufficient XP cannot ready and expired lobbies refund reserved XP', () =
   engine.tick(901001, null);
   assert.equal(engine.require(battle.id).status, 'void');
   assert.equal(store.account('1')!.balance, 1000);
+  store.close();
+});
+
+test('ready window starts with the first ready player and ignores inactive joiners', () => {
+  const { store, engine } = fixture();
+  const battle = engine.create('g', 25, '1', 1000);
+  engine.join(battle.id, '1', 'A'); engine.join(battle.id, '2', 'B'); engine.join(battle.id, '3', 'Inactive');
+  engine.ready(battle.id, '1', 1000); engine.ready(battle.id, '2', 5000);
+  assert.equal(engine.require(battle.id).lobby_deadline, 31000);
+  engine.tick(30999, quote(100, 30999));
+  assert.equal(engine.require(battle.id).status, 'lobby');
+  engine.tick(31000, quote(100, 31000));
+  assert.equal(engine.require(battle.id).status, 'countdown');
+  engine.tick(34000, quote(100, 34000));
+  assert.throws(() => engine.predict(battle.id, '3', 'LONG', 35000), /not ready/);
+  engine.predict(battle.id, '1', 'LONG', 35000); engine.predict(battle.id, '2', 'SHORT', 35000);
+  engine.tick(94000, quote(101, 94000));
+  assert.equal(store.account('3')!.balance, 1000);
+  store.close();
+});
+
+test('short lobby refunds one ready player and hard-expired lobby is replaced', () => {
+  const { store, engine } = fixture();
+  const first = engine.create('g', 50, '1', 1000);
+  engine.join(first.id, '1', 'A'); engine.ready(first.id, '1', 1000);
+  engine.tick(31000, null);
+  assert.equal(engine.require(first.id).status, 'void');
+  assert.equal(store.account('1')!.balance, 1000);
+  const stale = engine.create('g', 50, '1', 32000);
+  const replacement = engine.create('g', 75, '2', 332001);
+  assert.notEqual(replacement.id, stale.id);
+  assert.equal(engine.require(stale.id).status, 'void');
+  assert.equal(replacement.stake, 75);
+  store.close();
+});
+
+test('only the creator can start early and two ready players are required', () => {
+  const { store, engine } = fixture();
+  const battle = engine.create('g', 10, '1', 1000);
+  engine.join(battle.id, '1', 'A'); engine.join(battle.id, '2', 'B');
+  engine.ready(battle.id, '1', 1000);
+  assert.throws(() => engine.startNow(battle.id, '1', 1000), /At least 2/);
+  engine.ready(battle.id, '2', 1000);
+  assert.throws(() => engine.startNow(battle.id, '2', 1000), (error: unknown) => (error as GameError).status === 403);
+  engine.startNow(battle.id, '1', 1000);
+  assert.equal(engine.require(battle.id).countdown_at, 4000);
   store.close();
 });
 
