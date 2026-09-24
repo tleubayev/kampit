@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 
 export type Status = 'lobby' | 'countdown' | 'live' | 'finished' | 'void';
 export type Side = 'LONG' | 'SHORT';
-export type Battle = { id: string; chat_id: string; status: Status; created_at: number; countdown_at: number | null; start_at: number | null; lock_at: number | null; end_at: number | null; start_price: number | null; end_price: number | null; outcome: Side | 'HOUSE' | 'TIE' | null; message_id: number | null; parent_id: string | null; successor_id: string | null; stake: number; creator_user_id: string | null };
+export type Battle = { id: string; chat_id: string; status: Status; created_at: number; lobby_deadline: number | null; countdown_at: number | null; start_at: number | null; lock_at: number | null; end_at: number | null; start_price: number | null; end_price: number | null; outcome: Side | 'HOUSE' | 'TIE' | null; message_id: number | null; parent_id: string | null; successor_id: string | null; stake: number; creator_user_id: string | null };
 export type Player = { battle_id: string; user_id: string; name: string; ready: number; prediction: Side | null };
 export type Account = { user_id: string; name: string; balance: number; referral_code: string; referred_by: string | null; last_daily_date: string };
 
@@ -29,6 +29,7 @@ export class Store {
     const columns = this.db.prepare('PRAGMA table_info(battles)').all() as { name: string }[];
     if (!columns.some(c => c.name === 'stake')) this.db.exec('ALTER TABLE battles ADD COLUMN stake INTEGER NOT NULL DEFAULT 0');
     if (!columns.some(c => c.name === 'creator_user_id')) this.db.exec('ALTER TABLE battles ADD COLUMN creator_user_id TEXT');
+    if (!columns.some(c => c.name === 'lobby_deadline')) this.db.exec('ALTER TABLE battles ADD COLUMN lobby_deadline INTEGER');
     this.db.exec(`CREATE TABLE IF NOT EXISTS accounts (user_id TEXT PRIMARY KEY, name TEXT NOT NULL, balance INTEGER NOT NULL CHECK(balance >= 0), referral_code TEXT NOT NULL UNIQUE, referred_by TEXT, last_daily_date TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
     if (!this.db.prepare("SELECT 1 FROM app_meta WHERE key='xp_reset_v2'").get()) {
@@ -94,7 +95,7 @@ export class Store {
   players(id: string) { return this.db.prepare('SELECT * FROM players WHERE battle_id=? ORDER BY rowid').all(id) as Player[]; }
   active(chatId: string) { return this.db.prepare("SELECT * FROM battles WHERE chat_id=? AND status IN ('lobby','countdown','live') ORDER BY created_at DESC LIMIT 1").get(chatId) as Battle | undefined; }
   pending() { return this.db.prepare("SELECT * FROM battles WHERE status IN ('countdown','live')").all() as Battle[]; }
-  staleLobbies(now: number) { return this.db.prepare("SELECT * FROM battles WHERE status='lobby' AND created_at<=?").all(now - 15 * 60000) as Battle[]; }
+  lobbies() { return this.db.prepare("SELECT * FROM battles WHERE status='lobby'").all() as Battle[]; }
   leaderboard(chatId: string) { return this.db.prepare('SELECT user_id,name,wins,losses,ties,streak,xp FROM stats WHERE chat_id=? ORDER BY xp DESC,wins DESC LIMIT 20').all(chatId); }
   stats(chatId: string, userId: string) { return this.db.prepare('SELECT user_id,name,wins,losses,ties,streak,xp FROM stats WHERE chat_id=? AND user_id=?').get(chatId, userId); }
   close() { this.db.close(); }
