@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { Store, type Battle, type Side } from './store.ts';
 import type { Quote } from './price.ts';
 
+export const MAX_PLAYERS = 100;
 export class GameError extends Error { status: number; constructor(message: string, status = 400) { super(message); this.status = status; } }
 export class Engine extends EventEmitter {
   store: Store;
@@ -36,8 +37,17 @@ export class Engine extends EventEmitter {
     const battle = this.require(id);
     if (battle.status !== 'lobby') throw new GameError('Lobby is closed');
     const clean = name.trim().slice(0, 40) || 'Player';
-    this.store.ensureAccount(userId, clean);
-    this.store.db.prepare('INSERT INTO players(battle_id,user_id,name) VALUES(?,?,?) ON CONFLICT(battle_id,user_id) DO UPDATE SET name=excluded.name').run(id, userId, clean);
+    this.store.db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = this.store.db.prepare('SELECT 1 FROM players WHERE battle_id=? AND user_id=?').get(id, userId);
+      if (!existing) {
+        const count = (this.store.db.prepare('SELECT COUNT(*) AS count FROM players WHERE battle_id=?').get(id) as { count: number }).count;
+        if (count >= MAX_PLAYERS) throw new GameError(`Battle is full (${MAX_PLAYERS} players)`, 409);
+      }
+      this.store.ensureAccount(userId, clean);
+      this.store.db.prepare('INSERT INTO players(battle_id,user_id,name) VALUES(?,?,?) ON CONFLICT(battle_id,user_id) DO UPDATE SET name=excluded.name').run(id, userId, clean);
+      this.store.db.exec('COMMIT');
+    } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
     this.emit('change', battle);
   }
   ready(id: string, userId: string, now = Date.now()) {
