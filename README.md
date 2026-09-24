@@ -14,6 +14,8 @@ A Telegram group game with one mode: synchronized 60-second SOL/USD rounds for 2
 
 One Node.js 24 TypeScript process serves the Telegram webhook, authenticated JSON API, Server-Sent Events, Mini App, round scheduler and Coinbase Exchange SOL-USD ticker feed. SQLite persists battles, players and group stats. Use a **single server instance** with persistent disk; the in-memory sessions and scheduler are not designed for multiple replicas. A price quote older than five seconds cannot start or end a round. A feed outage longer than 15 seconds past the planned finish voids it without XP.
 
+The process rate limits authenticated API traffic to 60 requests per user per minute, state-changing Mini App actions to 10 per user per minute, session creation to 10 per user per minute, and battle requests to 3 per group per minute. Live Server-Sent Event updates do not consume this allowance. Limits are intentionally stored in memory for the single-replica deployment.
+
 ## Setup
 
 1. Create a Telegram bot in BotFather. Configure a Mini App with a short name and point it to the public HTTPS URL of this service.
