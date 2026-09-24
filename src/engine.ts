@@ -4,13 +4,20 @@ import { Store, type Battle, type Side } from './store.ts';
 import type { Quote } from './price.ts';
 
 export const MAX_PLAYERS = 100;
+export const LOBBY_READY_MS = 30_000;
+export const LOBBY_MAX_MS = 5 * 60_000;
+const COUNTDOWN_MS = 3_000;
 export class GameError extends Error { status: number; constructor(message: string, status = 400) { super(message); this.status = status; } }
 export class Engine extends EventEmitter {
   store: Store;
   constructor(store: Store) { super(); this.store = store; }
   create(chatId: string, stake: number, creatorUserId: string, now = Date.now(), parentId: string | null = null): Battle {
     if (!Number.isSafeInteger(stake) || stake < 10) throw new GameError('Stake must be at least 10 XP');
-    const existing = this.store.active(chatId);
+    let existing = this.store.active(chatId);
+    if (existing?.status === 'lobby') {
+      this.advanceLobby(existing, now);
+      existing = this.store.active(chatId);
+    }
     if (existing) return existing;
     const id = randomBytes(8).toString('hex');
     this.store.db.prepare('INSERT INTO battles(id,chat_id,status,created_at,parent_id,stake,creator_user_id) VALUES(?,?,?,?,?,?,?)').run(id, chatId, 'lobby', now, parentId, stake, creatorUserId);
@@ -61,24 +68,29 @@ export class Engine extends EventEmitter {
       const debited = this.store.db.prepare('UPDATE accounts SET balance=balance-? WHERE user_id=? AND balance>=?').run(battle.stake, userId, battle.stake);
       if (!debited.changes) throw new GameError(`You need ${battle.stake} XP to ready up`);
       this.store.db.prepare('UPDATE players SET ready=1 WHERE battle_id=? AND user_id=?').run(id, userId);
+      this.store.db.prepare('UPDATE battles SET lobby_deadline=COALESCE(lobby_deadline,?) WHERE id=? AND status=\'lobby\'')
+        .run(Math.min(now + LOBBY_READY_MS, battle.created_at + LOBBY_MAX_MS), id);
       this.store.db.exec('COMMIT');
     } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
-    const players = this.store.players(id);
-    if (players.length >= 2 && players.every(p => p.ready)) {
-      this.store.db.prepare("UPDATE battles SET status='countdown',countdown_at=? WHERE id=? AND status='lobby'").run(now + 3000, id);
-    }
     this.emit('change', this.require(id));
+  }
+  startNow(id: string, userId: string, now = Date.now()) {
+    const battle = this.require(id);
+    if (battle.status !== 'lobby') throw new GameError('Lobby is closed');
+    if (battle.creator_user_id !== userId) throw new GameError('Only the room creator can start early', 403);
+    if (this.readyCount(id) < 2) throw new GameError('At least 2 ready players are required');
+    this.beginCountdown(id, now);
   }
   predict(id: string, userId: string, side: Side, now = Date.now()) {
     const battle = this.require(id);
     if (battle.status !== 'live' || !battle.lock_at || now >= battle.lock_at) throw new GameError('Prediction window is closed');
     if (side !== 'LONG' && side !== 'SHORT') throw new GameError('Invalid prediction');
-    const result = this.store.db.prepare('UPDATE players SET prediction=? WHERE battle_id=? AND user_id=? AND prediction IS NULL').run(side, id, userId);
-    if (!result.changes) throw new GameError('Already predicted or not in battle');
+    const result = this.store.db.prepare('UPDATE players SET prediction=? WHERE battle_id=? AND user_id=? AND ready=1 AND prediction IS NULL').run(side, id, userId);
+    if (!result.changes) throw new GameError('Already predicted or not ready for this battle');
     this.emit('change', battle);
   }
   tick(now: number, quote: Quote | null) {
-    for (const battle of this.store.staleLobbies(now)) this.void(battle.id);
+    for (const battle of this.store.lobbies()) this.advanceLobby(battle, now);
     for (const battle of this.store.pending()) {
       if (battle.status === 'countdown' && battle.countdown_at! <= now) {
         if (!quote || now - quote.at > 5000) continue;
@@ -93,6 +105,21 @@ export class Engine extends EventEmitter {
         }
       }
     }
+  }
+  private readyCount(id: string) {
+    return (this.store.db.prepare('SELECT COUNT(*) AS count FROM players WHERE battle_id=? AND ready=1').get(id) as { count: number }).count;
+  }
+  private beginCountdown(id: string, now: number) {
+    const result = this.store.db.prepare("UPDATE battles SET status='countdown',countdown_at=? WHERE id=? AND status='lobby'").run(now + COUNTDOWN_MS, id);
+    if (result.changes) this.emit('change', this.require(id));
+  }
+  private advanceLobby(battle: Battle, now: number) {
+    if (battle.status !== 'lobby') return;
+    const hardExpired = battle.created_at + LOBBY_MAX_MS <= now;
+    const readyExpired = battle.lobby_deadline !== null && battle.lobby_deadline <= now;
+    if (!hardExpired && !readyExpired) return;
+    if (readyExpired && this.readyCount(battle.id) >= 2) this.beginCountdown(battle.id, now);
+    else this.void(battle.id);
   }
   resolve(id: string, quote: Quote) {
     const battle = this.require(id);
