@@ -1,5 +1,6 @@
 import type { Engine } from './engine.ts';
 import type { Battle } from './store.ts';
+import { SlidingWindowRateLimiter } from './rate-limit.ts';
 
 type TgUser = { id: number; first_name: string; last_name?: string };
 type TgMessage = { message_id: number; chat: { id: number; type: string }; from?: TgUser; text?: string; migrate_to_chat_id?: number; migrate_from_chat_id?: number };
@@ -7,6 +8,8 @@ type Update = { update_id: number; message?: TgMessage; callback_query?: { id: s
 
 export class Bot {
   private token: string; private username: string; private shortName: string; private engine: Engine;
+  private battleLimiter = new SlidingWindowRateLimiter();
+  private warningLimiter = new SlidingWindowRateLimiter();
   constructor(token: string, username: string, shortName: string, engine: Engine) { this.token=token; this.username=username; this.shortName=shortName; this.engine=engine; }
   link(id: string) { return `https://t.me/${this.username}/${this.shortName}?startapp=${id}`; }
   async call(method: string, body: Record<string, unknown>) {
@@ -73,6 +76,7 @@ export class Bot {
       }
       const amount = message.text.trim().split(/\s+/)[1];
       if (!amount) {
+        if (!await this.allowBattleRequest(chatId)) return;
         await this.call('sendMessage', { chat_id: chatId, text: 'Choose the XP stake for this room (minimum 10), or send /battle 25 for a custom stake.', reply_markup: { inline_keyboard: [[10, 50, 100, 500].map(n => ({ text: `${n} XP`, callback_data: `stake:${n}` }))] } });
       } else if (!/^\d+$/.test(amount) || Number(amount) < 10 || !Number.isSafeInteger(Number(amount))) {
         await this.call('sendMessage', { chat_id: chatId, text: 'Stake must be a whole number of at least 10 XP. Example: /battle 50' });
@@ -106,6 +110,7 @@ export class Bot {
     const chatId = String(message.chat.id);
     if (!['group', 'supergroup'].includes(message.chat.type)) return;
     if (!Number.isSafeInteger(stake) || stake < 10) return;
+    if (!await this.allowBattleRequest(chatId)) return;
     const previous = this.engine.store.active(chatId);
     if (!previous) {
       const account = this.engine.store.ensureAccount(String(creator.id), creator.first_name);
@@ -114,5 +119,13 @@ export class Bot {
     const battle = this.engine.create(chatId, stake, String(creator.id));
     if (!previous || !battle.message_id) await this.card(battle);
     else await this.call('sendMessage', { chat_id: chatId, text: 'A battle is already open.', reply_markup: { inline_keyboard: [[{ text: 'JOIN BATTLE', url: this.link(battle.id) }]] } });
+  }
+  private async allowBattleRequest(chatId: string) {
+    const result = this.battleLimiter.take(chatId, 3, 60_000);
+    if (result.allowed) return true;
+    if (this.warningLimiter.take(chatId, 1, 10_000).allowed) {
+      await this.call('sendMessage', { chat_id: chatId, text: `Too many battle requests. Try again in ${Math.ceil(result.retryAfterMs / 1000)} seconds.` });
+    }
+    return false;
   }
 }
