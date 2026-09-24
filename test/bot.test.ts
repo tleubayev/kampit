@@ -27,3 +27,16 @@ test('group stake choice creates one room and a new referral credits its inviter
   assert.equal(store.account('2')!.balance, 1000);
   store.close();
 });
+
+test('battle requests are limited to three per group per minute', async () => {
+  const store = new Store(':memory:');
+  const bot = new Bot('test:token', 'Kampit_robot', 'play', new Engine(store));
+  const sent: { method: string; body: Record<string, unknown> }[] = [];
+  bot.call = async (method, body) => { sent.push({ method, body }); return { message_id: sent.length }; };
+  const message = { message_id: 1, chat: { id: -200, type: 'group' }, from: { id: 1, first_name: 'Ali' }, text: '/battle' };
+  for (let update_id = 1; update_id <= 5; update_id++) await bot.handle({ update_id, message });
+  const texts = sent.filter(item => item.method === 'sendMessage').map(item => String(item.body.text));
+  assert.equal(texts.filter(text => text.startsWith('Choose the XP stake')).length, 3);
+  assert.equal(texts.filter(text => text.startsWith('Too many battle requests')).length, 1);
+  store.close();
+});
