@@ -154,6 +154,7 @@ const server = createServer(async (req, res) => {
         engine.join(id, String(actor.user.id), [actor.user.first_name, actor.user.last_name].filter(Boolean).join(' ')); json(res, 200, view(id, String(actor.user.id))); return;
       }
       if (req.method === 'POST' && parts[3] === 'ready') { engine.ready(id, String(actor.user.id)); json(res, 200, view(id, String(actor.user.id))); return; }
+      if (req.method === 'POST' && parts[3] === 'start') { engine.startNow(id, String(actor.user.id)); json(res, 200, view(id, String(actor.user.id))); return; }
       if (req.method === 'POST' && parts[3] === 'predict') {
         const data = await body(req);
         engine.predict(id, String(actor.user.id), data.side as any); json(res, 200, view(id, String(actor.user.id))); return;
