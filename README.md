@@ -1,6 +1,6 @@
 # SOL Quick Battle
 
-A Telegram group game with one mode: synchronized 60-second SOL/USD rounds. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. Rooms have a creator-selected virtual XP stake of at least 10. There are no deposits, real-money stakes, or prizes.
+A Telegram group game with one mode: synchronized 60-second SOL/USD rounds for 2–100 players. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. Rooms have a creator-selected virtual XP stake of at least 10. There are no deposits, real-money stakes, or prizes.
 
 ## XP rules
 
