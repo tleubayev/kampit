@@ -1,6 +1,6 @@
 # SOL Quick Battle
 
-A Telegram group game with one mode: synchronized 60-second SOL/USD rounds for 2–100 players. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. Rooms have a creator-selected virtual XP stake of at least 10. There are no deposits, real-money stakes, or prizes.
+A Telegram group game with one mode: synchronized 60-second SOL/USD rounds for 2–100 players. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. The first ready player starts a 30-second lobby window; at its end, two or more ready players proceed and unready joiners are excluded. Rooms have a creator-selected virtual XP stake of at least 10. There are no deposits, real-money stakes, or prizes.
 
 ## XP rules
 
@@ -19,7 +19,7 @@ One Node.js 24 TypeScript process serves the Telegram webhook, authenticated JSO
 1. Create a Telegram bot in BotFather. Configure a Mini App with a short name and point it to the public HTTPS URL of this service.
 2. Copy `.env.example` to `.env` and fill in the values. The server loads `.env` automatically when present; keep it out of version control. `BOT_USERNAME` omits `@`. Generate a long random `WEBHOOK_SECRET`. Ensure the service can reach `api.telegram.org` and `api.exchange.coinbase.com`.
 3. On a Node.js 24 host, run `npm start` (or `node src/server.ts`). No npm dependencies or build step are required. Mount persistent storage for `DATABASE_PATH`.
-4. The service registers its webhook and commands at startup. Add the bot to a Telegram group and send `/battle` to choose a stake, or `/battle 25` to set one directly. The creator can use `/cancel` before the countdown; unused lobbies expire and refund after 15 minutes. Use `/leaderboard`, `/stats`, and `/help` in the group.
+4. The service registers its webhook and commands at startup. Add the bot to a Telegram group and send `/battle` to choose a stake, or `/battle 25` to set one directly. The creator can start early in the Mini App when at least two players are ready, or use `/cancel` before the countdown. A ready window with fewer than two ready players closes and refunds automatically. Every lobby has a five-minute maximum lifetime, after which a new `/battle` creates a fresh room. Use `/leaderboard`, `/stats`, and `/help` in the group.
 
 The group button uses `https://t.me/BOT_USERNAME/MINI_APP_SHORT_NAME?startapp=BATTLE_ID`. Telegram's group inline `web_app` button is private-chat only, so this direct Mini App link is required. The app validates Telegram `initData` server-side, exchanges it for an HttpOnly session cookie, and keeps the battle identifier separate from identity. Open the link inside Telegram; ordinary browser visits cannot join.
 
