@@ -1,6 +1,6 @@
 # SOL Quick Battle
 
-A Telegram group game with one mode: synchronized 60-second SOL/USD rounds for 2–100 players. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. The first ready player starts a 30-second lobby window; at its end, two or more ready players proceed and unready joiners are excluded. Rooms have a creator-selected virtual XP stake of at least 10. There are no deposits, real-money stakes, or prizes.
+A Telegram group game with one mode: synchronized 60-second SOL/USD rounds for 2–100 players. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. The first ready player starts a 30-second lobby window; at its end, two or more ready players proceed and unready joiners are excluded. Rematch switches the current Mini App window to the new lobby and posts a fresh group card for other players. Rooms have a creator-selected virtual XP stake of at least 10. There are no deposits, real-money stakes, or prizes.
 
 ## XP rules
 
