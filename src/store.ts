@@ -5,7 +5,7 @@ export type Status = 'lobby' | 'countdown' | 'live' | 'finished' | 'void';
 export type Side = 'LONG' | 'SHORT';
 export type Battle = { id: string; chat_id: string; status: Status; created_at: number; lobby_deadline: number | null; countdown_at: number | null; start_at: number | null; lock_at: number | null; end_at: number | null; start_price: number | null; end_price: number | null; outcome: Side | 'HOUSE' | 'TIE' | null; message_id: number | null; parent_id: string | null; successor_id: string | null; stake: number; creator_user_id: string | null };
 export type Player = { battle_id: string; user_id: string; name: string; ready: number; prediction: Side | null };
-export type Account = { user_id: string; name: string; balance: number; referral_code: string; referred_by: string | null; last_daily_date: string };
+export type Account = { user_id: string; name: string; balance: number; referral_code: string; referred_by: string | null; last_daily_date: string; created_at: number; last_seen_at: number };
 
 export function dailyDate(now: number, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
@@ -32,27 +32,34 @@ export class Store {
     if (!columns.some(c => c.name === 'lobby_deadline')) this.db.exec('ALTER TABLE battles ADD COLUMN lobby_deadline INTEGER');
     this.db.exec(`CREATE TABLE IF NOT EXISTS accounts (user_id TEXT PRIMARY KEY, name TEXT NOT NULL, balance INTEGER NOT NULL CHECK(balance >= 0), referral_code TEXT NOT NULL UNIQUE, referred_by TEXT, last_daily_date TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+    const accountColumns = this.db.prepare('PRAGMA table_info(accounts)').all() as { name: string }[];
+    if (!accountColumns.some(c => c.name === 'created_at')) this.db.exec('ALTER TABLE accounts ADD COLUMN created_at INTEGER');
+    if (!accountColumns.some(c => c.name === 'last_seen_at')) this.db.exec('ALTER TABLE accounts ADD COLUMN last_seen_at INTEGER');
     if (!this.db.prepare("SELECT 1 FROM app_meta WHERE key='xp_reset_v2'").get()) {
       this.db.exec('BEGIN IMMEDIATE');
       try {
         const today = dailyDate(Date.now(), this.timeZone);
         this.db.exec('CREATE TABLE IF NOT EXISTS stats_before_xp_reset AS SELECT * FROM stats');
         const former = this.db.prepare('SELECT user_id, MAX(name) AS name FROM (SELECT user_id,name FROM players UNION ALL SELECT user_id,name FROM stats) GROUP BY user_id').all() as { user_id: string; name: string }[];
-        const insert = this.db.prepare('INSERT OR IGNORE INTO accounts(user_id,name,balance,referral_code,last_daily_date) VALUES(?,?,?,?,?)');
-        for (const user of former) insert.run(user.user_id, user.name, 1000, randomBytes(8).toString('hex'), today);
+        const insert = this.db.prepare('INSERT OR IGNORE INTO accounts(user_id,name,balance,referral_code,last_daily_date,created_at,last_seen_at) VALUES(?,?,?,?,?,?,?)');
+        const now = Date.now();
+        for (const user of former) insert.run(user.user_id, user.name, 1000, randomBytes(8).toString('hex'), today, now, now);
         this.db.exec('UPDATE stats SET xp=0');
         this.db.exec("UPDATE battles SET status='void' WHERE stake=0 AND status IN ('lobby','countdown','live')");
         this.db.prepare("INSERT INTO app_meta(key,value) VALUES('xp_reset_v2',?)").run(today);
         this.db.exec('COMMIT');
       } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     }
+    const migrationNow = Date.now();
+    this.db.prepare(`UPDATE accounts SET created_at=COALESCE((SELECT MIN(b.created_at) FROM players p JOIN battles b ON b.id=p.battle_id WHERE p.user_id=accounts.user_id),?) WHERE created_at IS NULL`).run(migrationNow);
+    this.db.prepare(`UPDATE accounts SET last_seen_at=COALESCE((SELECT MAX(b.created_at) FROM players p JOIN battles b ON b.id=p.battle_id WHERE p.user_id=accounts.user_id),created_at,?) WHERE last_seen_at IS NULL`).run(migrationNow);
   }
   account(userId: string) { return this.db.prepare('SELECT * FROM accounts WHERE user_id=?').get(userId) as Account | undefined; }
   ensureAccount(userId: string, name: string, now = Date.now()) {
     const clean = name.trim().slice(0, 40) || 'Player';
-    this.db.prepare('INSERT OR IGNORE INTO accounts(user_id,name,balance,referral_code,last_daily_date) VALUES(?,?,?,?,?)')
-      .run(userId, clean, 1000, randomBytes(8).toString('hex'), dailyDate(now, this.timeZone));
-    this.db.prepare('UPDATE accounts SET name=? WHERE user_id=?').run(clean, userId);
+    this.db.prepare('INSERT OR IGNORE INTO accounts(user_id,name,balance,referral_code,last_daily_date,created_at,last_seen_at) VALUES(?,?,?,?,?,?,?)')
+      .run(userId, clean, 1000, randomBytes(8).toString('hex'), dailyDate(now, this.timeZone), now, now);
+    this.db.prepare('UPDATE accounts SET name=?,last_seen_at=? WHERE user_id=?').run(clean, now, userId);
     return this.account(userId)!;
   }
   claimReferral(userId: string, name: string, code: string, now = Date.now()) {
@@ -61,8 +68,8 @@ export class Store {
     if (!referrer || referrer.user_id === userId) return false;
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.db.prepare('INSERT INTO accounts(user_id,name,balance,referral_code,referred_by,last_daily_date) VALUES(?,?,?,?,?,?)')
-        .run(userId, name.trim().slice(0, 40) || 'Player', 1000, randomBytes(8).toString('hex'), referrer.user_id, dailyDate(now, this.timeZone));
+      this.db.prepare('INSERT INTO accounts(user_id,name,balance,referral_code,referred_by,last_daily_date,created_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?)')
+        .run(userId, name.trim().slice(0, 40) || 'Player', 1000, randomBytes(8).toString('hex'), referrer.user_id, dailyDate(now, this.timeZone), now, now);
       this.db.prepare('UPDATE accounts SET balance=balance+100 WHERE user_id=?').run(referrer.user_id);
       this.db.exec('COMMIT'); return true;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -98,5 +105,34 @@ export class Store {
   lobbies() { return this.db.prepare("SELECT * FROM battles WHERE status='lobby'").all() as Battle[]; }
   leaderboard(chatId: string) { return this.db.prepare('SELECT user_id,name,wins,losses,ties,streak,xp FROM stats WHERE chat_id=? ORDER BY xp DESC,wins DESC LIMIT 20').all(chatId); }
   stats(chatId: string, userId: string) { return this.db.prepare('SELECT user_id,name,wins,losses,ties,streak,xp FROM stats WHERE chat_id=? AND user_id=?').get(chatId, userId); }
+  dashboardMetrics(now = Date.now()) {
+    const value = (sql: string, ...params: unknown[]) => Number((this.db.prepare(sql).get(...params) as { value: number | null }).value || 0);
+    const since24h = now - 86400000, since7d = now - 7 * 86400000, since30d = now - 30 * 86400000;
+    const dailyRows = this.db.prepare("SELECT date(created_at/1000,'unixepoch') AS day,COUNT(*) AS games FROM battles WHERE created_at>=? GROUP BY day ORDER BY day").all(now - 13 * 86400000) as { day: string; games: number }[];
+    const daily = new Map(dailyRows.map(row => [row.day, Number(row.games)]));
+    const gamesByDay = Array.from({ length: 14 }, (_, index) => {
+      const date = new Date(now - (13 - index) * 86400000).toISOString().slice(0, 10);
+      return { date, games: daily.get(date) || 0 };
+    });
+    return {
+      users: value('SELECT COUNT(*) AS value FROM accounts'),
+      active24h: value('SELECT COUNT(*) AS value FROM accounts WHERE last_seen_at>=?', since24h),
+      active7d: value('SELECT COUNT(*) AS value FROM accounts WHERE last_seen_at>=?', since7d),
+      active30d: value('SELECT COUNT(*) AS value FROM accounts WHERE last_seen_at>=?', since30d),
+      groups: value('SELECT COUNT(DISTINCT chat_id) AS value FROM battles'),
+      battles: value('SELECT COUNT(*) AS value FROM battles'),
+      activeBattles: value("SELECT COUNT(*) AS value FROM battles WHERE status IN ('lobby','countdown','live')"),
+      completedBattles: value("SELECT COUNT(*) AS value FROM battles WHERE status='finished'"),
+      voidBattles: value("SELECT COUNT(*) AS value FROM battles WHERE status='void'"),
+      averagePlayers: Math.round(value('SELECT AVG(player_count) AS value FROM (SELECT COUNT(p.user_id) AS player_count FROM battles b LEFT JOIN players p ON p.battle_id=b.id GROUP BY b.id)') * 10) / 10,
+      maxPlayers: value('SELECT COALESCE(MAX(player_count),0) AS value FROM (SELECT COUNT(*) AS player_count FROM players GROUP BY battle_id)'),
+      totalXp: value('SELECT COALESCE(SUM(balance),0) AS value FROM accounts'),
+      stakedXp: value("SELECT COALESCE(SUM(b.stake),0) AS value FROM battles b JOIN players p ON p.battle_id=b.id AND p.ready=1 WHERE b.status IN ('lobby','countdown','live')"),
+      burnedXp: value("SELECT COALESCE(SUM(b.stake),0) AS value FROM battles b JOIN players p ON p.battle_id=b.id AND p.ready=1 WHERE b.status='finished' AND b.outcome='HOUSE'"),
+      referrals: value('SELECT COUNT(*) AS value FROM accounts WHERE referred_by IS NOT NULL'),
+      resultDeliveryBacklog: value("SELECT COUNT(*) AS value FROM battles WHERE status IN ('finished','void') AND id NOT IN (SELECT battle_id FROM result_deliveries)"),
+      gamesByDay,
+    };
+  }
   close() { this.db.close(); }
 }
