@@ -4,6 +4,7 @@ const money = value => Number.isFinite(value) ? `$${Number(value).toFixed(2)}` :
 const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 let battleId, state, stream, accountInfo, requestBusy = false, serverOffset = 0, lastServerNow = 0;
 const startParam = tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('tgWebAppStartParam');
+const windowBattle = new URLSearchParams(location.search).get('battle');
 function drawChart(points, startPrice) {
   const canvas = el('chart'), ctx = canvas.getContext('2d');
   const scale = devicePixelRatio || 1, width = canvas.clientWidth, height = canvas.clientHeight;
@@ -21,9 +22,18 @@ async function api(path, method='GET', data) {
   const res=await fetch(path,{method,credentials:'same-origin',headers:{'content-type':'application/json'},body:data?JSON.stringify(data):undefined});
   const json=await res.json();if(!res.ok)throw new Error(json.error||'Request failed');return json;
 }
+async function openBattle(id, updateAddress=false) {
+  if(!/^[a-f0-9]{16}$/.test(id))throw new Error('Open a battle link from your Telegram group.');
+  stream?.close();stream=undefined;state=undefined;lastServerNow=0;battleId=id;
+  if(updateAddress){const url=new URL(location.href);url.searchParams.set('battle',id);history.replaceState({},'',url);}
+  render(await api(`/api/battles/${battleId}`));
+  stream=new EventSource(`/api/battles/${battleId}/events`);
+  stream.onmessage=event=>render(JSON.parse(event.data));
+  stream.onerror=()=>{el('feedTime').textContent='RECONNECTING';};
+}
 async function action(name,data) {
   if(requestBusy)return;requestBusy=true;
-  try { const result=await api(`/api/battles/${battleId}/${name}`,'POST',data); if(name==='rematch') { tg?.openTelegramLink?.(result.url); } else render(result); }
+  try { const result=await api(`/api/battles/${battleId}/${name}`,'POST',data); if(name==='rematch') await openBattle(result.id,true); else render(result); }
   catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);} finally {requestBusy=false;}
 }
 window.doAction=action;
@@ -74,13 +84,9 @@ async function boot(){
     const session=await api('/api/session','POST',{initData:tg.initData});
     showAccount(await api('/api/me'));
     setInterval(async()=>{try{showAccount(await api('/api/me'));}catch{}},30000);
-    battleId=session.startParam||startParam;
+    battleId=windowBattle||session.startParam||startParam;
     if(!battleId) { document.body.classList.add('home'); el('content').innerHTML='<h1>Ready to play?</h1><p>Add the bot to a group and send /battle to choose a stake. Share your invite link below for 100 XP per new friend.</p>'; return; }
-    if(!/^[a-f0-9]{16}$/.test(battleId))throw new Error('Open a battle link from your Telegram group.');
-    render(await api(`/api/battles/${battleId}`));
-    stream=new EventSource(`/api/battles/${battleId}/events`);
-    stream.onmessage=event=>render(JSON.parse(event.data));
-    stream.onerror=()=>{el('feedTime').textContent='RECONNECTING';};
+    await openBattle(battleId);
     setInterval(()=>{if(state)render(state);},250);
   } catch(error){el('content').innerHTML=`<h1>Cannot open battle</h1><p>${safe(error.message)}</p>`;}
 }
