@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { loadEnvFile } from 'node:process';
 import { resolve } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Store } from './store.ts';
 import { Engine, GameError } from './engine.ts';
 import { CoinbasePriceFeed } from './price.ts';
@@ -18,6 +18,7 @@ const username = process.env.BOT_USERNAME || '';
 const shortName = process.env.MINI_APP_SHORT_NAME || '';
 const appUrl = process.env.APP_URL || '';
 const webhookSecret = process.env.WEBHOOK_SECRET || '';
+const adminPassword = process.env.ADMIN_PASSWORD || '';
 if (!token || !username || !shortName || !appUrl || !webhookSecret || webhookSecret.length < 16) {
   console.error('Set BOT_TOKEN, BOT_USERNAME, MINI_APP_SHORT_NAME, APP_URL and WEBHOOK_SECRET (16+ chars).'); process.exit(1);
 }
@@ -42,6 +43,25 @@ function enforceLimit(limiter: SlidingWindowRateLimiter, key: string, limit: num
 
 function json(res: ServerResponse, status: number, value: unknown) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value));
+}
+function sameSecret(left: string, right: string) {
+  const a = Buffer.from(left), b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+function adminAuthorized(req: IncomingMessage) {
+  if (req.headers.authorization === `Bearer ${webhookSecret}`) return true;
+  if (!adminPassword || !req.headers.authorization?.startsWith('Basic ')) return false;
+  try {
+    const decoded = Buffer.from(req.headers.authorization.slice(6), 'base64').toString('utf8');
+    const split = decoded.indexOf(':');
+    return split >= 0 && decoded.slice(0, split) === 'admin' && sameSecret(decoded.slice(split + 1), adminPassword);
+  } catch { return false; }
+}
+function requireAdmin(req: IncomingMessage, res: ServerResponse) {
+  if (adminAuthorized(req)) return true;
+  res.setHeader('www-authenticate', 'Basic realm="Kampit Admin", charset="UTF-8"');
+  json(res, 401, { error: 'Admin login required' });
+  return false;
 }
 function cookie(req: IncomingMessage) { return /(?:^|; )session=([^;]+)/.exec(req.headers.cookie || '')?.[1]; }
 function identity(req: IncomingMessage) {
@@ -102,18 +122,14 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', appUrl);
     const path = url.pathname;
     if (req.method === 'GET' && path === '/health') { json(res, 200, { ok: true, priceFresh: !!feed.fresh() }); return; }
+    if (req.method === 'GET' && path === '/admin') {
+      if (!requireAdmin(req, res)) return;
+      const content = await readFile(resolve(publicDir, 'admin.html'));
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(content); return;
+    }
     if (req.method === 'GET' && path === '/admin/metrics') {
-      if (req.headers.authorization !== `Bearer ${webhookSecret}`) throw new GameError('Forbidden', 403);
-      const count = (sql: string) => (store.db.prepare(sql).get() as { count: number }).count;
-      json(res, 200, {
-        uniquePlayers: count('SELECT COUNT(DISTINCT user_id) AS count FROM players'),
-        accounts: count('SELECT COUNT(*) AS count FROM accounts'),
-        totalBalance: count('SELECT COALESCE(SUM(balance),0) AS count FROM accounts'),
-        groupNetXp: count('SELECT COALESCE(SUM(xp),0) AS count FROM stats'),
-        groups: count('SELECT COUNT(DISTINCT chat_id) AS count FROM battles'),
-        battles: count('SELECT COUNT(*) AS count FROM battles'),
-        completedBattles: count("SELECT COUNT(*) AS count FROM battles WHERE status = 'finished'"),
-      }); return;
+      if (!requireAdmin(req, res)) return;
+      json(res, 200, { ...store.dashboardMetrics(), health: { priceFresh: !!feed.fresh(), connectedPlayers: [...streams.values()].reduce((sum, clients) => sum + clients.size, 0) }, generatedAt: Date.now() }); return;
     }
     if (req.method === 'POST' && path === '/telegram/webhook') {
       if (req.headers['x-telegram-bot-api-secret-token'] !== webhookSecret) throw new GameError('Forbidden', 403);
