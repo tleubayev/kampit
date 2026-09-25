@@ -198,7 +198,7 @@ const server = createServer(async (req, res) => {
       if (req.method === 'POST' && parts[3] === 'rematch') {
         const next = engine.rematch(id, String(actor.user.id));
         if (!next.message_id) void bot.card(next).catch(error => console.error('Rematch card:', error));
-        json(res, 200, { id: next.id, url: bot.link(next.id) }); return;
+        json(res, 200, { id: next.id }); return;
       }
       throw new GameError('Not found', 404);
     }
