@@ -79,7 +79,7 @@ function render(data) {
 }
 async function boot(){
   tg?.ready();tg?.expand();
-  if(!tg?.initData){el('content').innerHTML='<h1>Open in Telegram</h1><p>Use the Join Battle button in your group chat.</p>';return;}
+  if(!tg?.initData){document.body.classList.add('marketing');return;}
   try {
     const session=await api('/api/session','POST',{initData:tg.initData});
     showAccount(await api('/api/me'));
