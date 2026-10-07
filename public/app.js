@@ -3,6 +3,7 @@ const el = id => document.getElementById(id);
 const money = value => Number.isFinite(value) ? `$${Number(value).toFixed(2)}` : '—';
 const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 let battleId, state, stream, accountInfo, requestBusy = false, serverOffset = 0, lastServerNow = 0;
+let payInfo;
 const startParam = tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('tgWebAppStartParam');
 const windowBattle = new URLSearchParams(location.search).get('battle');
 function drawChart(points, startPrice) {
@@ -26,7 +27,8 @@ async function openBattle(id, updateAddress=false) {
   if(!/^[a-f0-9]{16}$/.test(id))throw new Error('Open a battle link from your Telegram group.');
   stream?.close();stream=undefined;state=undefined;lastServerNow=0;battleId=id;
   if(updateAddress){const url=new URL(location.href);url.searchParams.set('battle',id);history.replaceState({},'',url);}
-  render(await api(`/api/battles/${battleId}`));
+  const initial=await api(`/api/battles/${battleId}`); render(initial);
+  if(initial.battle.mode==='USDC_TEST'){payInfo=await api('/api/pay');render(initial);}
   stream=new EventSource(`/api/battles/${battleId}/events`);
   stream.onmessage=event=>render(JSON.parse(event.data));
   stream.onerror=()=>{el('feedTime').textContent='RECONNECTING';};
@@ -37,6 +39,7 @@ async function action(name,data) {
   catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);} finally {requestBusy=false;}
 }
 window.doAction=action;
+window.claimTestUsdc=async()=>{try{const result=await api('/api/pay/faucet','POST');payInfo={...payInfo,balanceMinor:result.balanceMinor};if(state)render(state);}catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);}};
 function showAccount(info) {
   accountInfo=info;
   el('balance').textContent=`${info.account.balance} XP`;
@@ -50,7 +53,8 @@ window.shareInvite=()=>{
 };
 function render(data) {
   if(data.serverNow !== lastServerNow){serverOffset=data.serverNow-Date.now();lastServerNow=data.serverNow;}state=data; const b=data.battle, now=Date.now()+serverOffset, remaining= b.status==='lobby'&&b.lobby_deadline?Math.max(0,b.lobby_deadline-now):b.status==='countdown'?Math.max(0,b.countdown_at-now):b.status==='live'?Math.max(0,b.end_at-now):0;
-  el('balance').textContent=`${data.account.balance} XP`;
+  const paid=b.mode==='USDC_TEST', stakeLabel=paid?`${(b.stakeMinor/1e6).toFixed(2)} TEST USDC`:`${b.stake} XP`;
+  el('balance').textContent=paid&&payInfo?`${(payInfo.balanceMinor/1e6).toFixed(2)} tUSDC`:`${data.account.balance} XP`;
   el('price').textContent=money(data.quote?.price || b.end_price || b.start_price);el('startPrice').textContent=money(b.start_price);
   const change=b.start_price&&data.quote ? (data.quote.price/b.start_price-1)*100 : null;
   el('delta').textContent=change===null?'Waiting for market data':`${change>=0?'+':''}${change.toFixed(3)}% from round start`;
@@ -64,13 +68,14 @@ function render(data) {
     const readyCount=data.players.filter(p=>p.ready).length, creator=b.isCreator;
     const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
     const start=creator&&readyCount>=2?'<button class="primary" onclick="doAction(\'start\')">START NOW</button>':'';
-    html=`<h1>Join the battle</h1><p>Stake ${b.stake} XP when you ready up. The 30-second lobby timer begins with the first ready player. Unready players are excluded. ${readyCount} ready.</p>${action}${start}`;
+    const faucet=paid&&payInfo&&payInfo.balanceMinor<b.stakeMinor?'<button class="secondary" onclick="claimTestUsdc()">CLAIM 10 TEST USDC</button>':'';
+    html=`<h1>${paid?'Devnet pay battle':'Join the battle'}</h1><p>${paid?'Test tokens have no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins with the first ready player. Unready players are excluded. ${readyCount} ready.</p>${faucet}${action}${start}`;
   }
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {
     const locked=now>=b.lock_at;
-    html=`<h1>${locked?'Picks are locked': 'Where will SOL finish?'}</h1><p>${mine?.prediction?`Your pick: ${mine.prediction}`:locked?'Watch the price until the finish.':'Choose in the first 10 seconds.'} · ${b.stake} XP stake</p><div class="choiceGrid"><button class="choice long ${mine?.prediction==='LONG'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'LONG'})"><b>↑</b>LONG</button><button class="choice short ${mine?.prediction==='SHORT'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'SHORT'})"><b>↓</b>SHORT</button></div><div class="small">${locked?'Prediction window closed':`Picks lock in ${Math.max(0,Math.ceil((b.lock_at-now)/1000))}s`}</div>`;
-  } else html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${b.outcome} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${mine.prediction}`:'No pick'}. ${b.outcome==='HOUSE'?'All staked XP burned.':b.outcome==='TIE'?'All stakes refunded.':'Winners split the XP pool.'}`}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${b.stake||10} XP</button>`;
+    html=`<h1>${locked?'Picks are locked': 'Where will SOL finish?'}</h1><p>${mine?.prediction?`Your pick: ${mine.prediction}`:locked?'Watch the price until the finish.':'Choose in the first 10 seconds.'} · ${stakeLabel} stake</p><div class="choiceGrid"><button class="choice long ${mine?.prediction==='LONG'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'LONG'})"><b>↑</b>LONG</button><button class="choice short ${mine?.prediction==='SHORT'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'SHORT'})"><b>↓</b>SHORT</button></div><div class="small">${locked?'Prediction window closed':`Picks lock in ${Math.max(0,Math.ceil((b.lock_at-now)/1000))}s`}</div>`;
+  } else html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${b.outcome} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${mine.prediction}`:'No pick'}. ${b.outcome==='HOUSE'?`The test house keeps the ${stakeLabel} stakes.`:b.outcome==='TIE'?'All stakes refunded.':`Winners split the ${paid?'test-USDC':'XP'} pool.`}`} ${paid?`Settlement: ${b.settlementStatus}.`:''}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${stakeLabel}</button>`;
   el('content').innerHTML=html;
   el('playerCount').textContent=`${data.players.length} / 100 joined`;
   el('players').innerHTML=data.players.length?data.players.map(p=>`<div class="row"><span>${safe(p.name)} ${p.isYou?'· YOU':''}</span><small class="${p.prediction==='LONG'?'green':p.prediction==='SHORT'?'red':''}">${p.prediction|| (p.ready?'READY':'JOINED')}</small></div>`).join(''):'<div class="empty">Waiting for players</div>';

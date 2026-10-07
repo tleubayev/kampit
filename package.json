@@ -3,10 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "dev": "node --watch --disable-warning=ExperimentalWarning src/server.ts",
-    "test": "node --test --disable-warning=ExperimentalWarning test/*.test.ts"
+    "test": "node --test --disable-warning=ExperimentalWarning test/*.test.ts",
+    "setup:devnet": "node --disable-warning=ExperimentalWarning scripts/setup-devnet.ts"
+  },
+  "dependencies": {
+    "@privy-io/node": "^0.35.0",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "bigint-buffer",
+      "bufferutil",
+      "utf-8-validate"
+    ]
   }
 }

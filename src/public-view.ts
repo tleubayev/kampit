@@ -2,7 +2,7 @@ import type { Account, Battle, Player } from './store.ts';
 
 type StatsRow = { user_id: string; name: string; wins: number; losses: number; ties: number; streak: number; xp: number };
 
-export function publicBattle(battle: Battle, userId: string) {
+export function publicBattle(battle: Battle, userId: string, paid?: { stake_minor: number; settlement_status: string }) {
   return {
     id: battle.id,
     status: battle.status,
@@ -16,6 +16,9 @@ export function publicBattle(battle: Battle, userId: string) {
     end_price: battle.end_price,
     outcome: battle.outcome,
     stake: battle.stake,
+    mode: paid ? 'USDC_TEST' : 'XP',
+    stakeMinor: paid?.stake_minor,
+    settlementStatus: paid?.settlement_status,
     isCreator: battle.creator_user_id === userId,
   };
 }

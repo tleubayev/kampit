@@ -25,12 +25,25 @@ export class Engine extends EventEmitter {
     this.emit('change', battle);
     return battle;
   }
+  createPaid(chatId: string, stakeMinor: number, creatorUserId: string, now = Date.now()): Battle {
+    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000) throw new GameError('Minimum test stake is 0.10 USDC');
+    const existing = this.store.active(chatId); if (existing) return existing;
+    const id = randomBytes(8).toString('hex');
+    this.store.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.store.db.prepare('INSERT INTO battles(id,chat_id,status,created_at,stake,creator_user_id) VALUES(?,?,?,?,0,?)').run(id, chatId, 'lobby', now, creatorUserId);
+      this.store.db.prepare('INSERT INTO paid_battles(battle_id,stake_minor) VALUES(?,?)').run(id, stakeMinor);
+      this.store.db.exec('COMMIT');
+    } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
+    const battle = this.require(id); this.emit('change', battle); return battle;
+  }
   rematch(id: string, userId: string, now = Date.now()): Battle {
     const battle = this.require(id);
     if (!['finished', 'void'].includes(battle.status)) throw new GameError('Battle is still in progress');
     if (!this.store.players(id).some(p => p.user_id === userId)) throw new GameError('Only a player can start a rematch', 403);
     if (battle.successor_id) return this.require(battle.successor_id);
-    const next = this.create(battle.chat_id, battle.stake || 10, userId, now, id);
+    const paid = this.store.paidBattle(id);
+    const next = paid ? this.createPaid(battle.chat_id, paid.stake_minor, userId, now) : this.create(battle.chat_id, battle.stake || 10, userId, now, id);
     this.store.db.prepare('UPDATE battles SET successor_id=? WHERE id=?').run(next.id, id);
     return next;
   }
@@ -72,6 +85,18 @@ export class Engine extends EventEmitter {
         .run(Math.min(now + LOBBY_READY_MS, battle.created_at + LOBBY_MAX_MS), id);
       this.store.db.exec('COMMIT');
     } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
+    this.emit('change', this.require(id));
+  }
+  readyPaid(id: string, userId: string, now = Date.now()) {
+    const battle = this.require(id);
+    if (!this.store.paidBattle(id)) throw new GameError('This is not a USDC test battle');
+    const player = this.store.db.prepare('SELECT ready FROM players WHERE battle_id=? AND user_id=?').get(id, userId) as { ready: number } | undefined;
+    if (!player) throw new GameError('Join the lobby first');
+    if (player.ready) return;
+    if (battle.status !== 'lobby') throw new GameError('Lobby is closed');
+    const result = this.store.db.prepare("UPDATE players SET ready=1 WHERE battle_id=? AND user_id=? AND ready=0 AND ?='lobby'").run(id, userId, battle.status);
+    if (!result.changes) throw new GameError('Could not ready player');
+    this.store.db.prepare("UPDATE battles SET lobby_deadline=COALESCE(lobby_deadline,?) WHERE id=? AND status='lobby'").run(Math.min(now + LOBBY_READY_MS, battle.created_at + LOBBY_MAX_MS), id);
     this.emit('change', this.require(id));
   }
   startNow(id: string, userId: string, now = Date.now()) {
@@ -129,6 +154,7 @@ export class Engine extends EventEmitter {
     const entrants = players.filter(p => p.ready);
     const winners = entrants.filter(p => p.prediction === outcome);
     const refund = outcome !== 'HOUSE' && winners.length === 0;
+    const paid = this.store.paidBattle(id);
     const pool = entrants.length * battle.stake;
     const shares = new Map<string, number>();
     if (refund) for (const p of entrants) shares.set(p.user_id, battle.stake);
@@ -139,11 +165,11 @@ export class Engine extends EventEmitter {
         .run(quote.at, quote.price, outcome, id);
       for (const player of entrants) {
         const payout = shares.get(player.user_id) || 0;
-        if (payout) this.store.db.prepare('UPDATE accounts SET balance=balance+? WHERE user_id=?').run(payout, player.user_id);
+        if (!paid && payout) this.store.db.prepare('UPDATE accounts SET balance=balance+? WHERE user_id=?').run(payout, player.user_id);
         if (!player.prediction && refund) continue;
         const win = player.prediction === outcome;
         const loss = !win;
-        const xp = payout - (player.ready ? battle.stake : 0);
+        const xp = paid ? 0 : payout - (player.ready ? battle.stake : 0);
         this.store.db.prepare(`INSERT INTO stats(chat_id,user_id,name,wins,losses,ties,streak,xp) VALUES(?,?,?,?,?,?,?,?)
           ON CONFLICT(chat_id,user_id) DO UPDATE SET name=excluded.name,wins=wins+excluded.wins,losses=losses+excluded.losses,ties=ties+excluded.ties,streak=CASE WHEN excluded.wins=1 THEN streak+1 ELSE 0 END,xp=xp+excluded.xp`)
           .run(battle.chat_id, player.user_id, player.name, win ? 1 : 0, loss ? 1 : 0, 0, win ? 1 : 0, xp);
@@ -160,7 +186,7 @@ export class Engine extends EventEmitter {
     this.store.db.exec('BEGIN IMMEDIATE');
     try {
       this.store.db.prepare("UPDATE battles SET status='void' WHERE id=?").run(id);
-      for (const player of this.store.players(id)) if (player.ready && battle.stake) {
+      for (const player of this.store.players(id)) if (player.ready && battle.stake && !this.store.paidBattle(id)) {
         this.store.db.prepare('UPDATE accounts SET balance=balance+? WHERE user_id=?').run(battle.stake, player.user_id);
       }
       this.store.db.exec('COMMIT');

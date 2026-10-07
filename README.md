@@ -41,6 +41,27 @@ Public API and live-event responses expose `isYou` and `isCreator` flags instead
 | `ADMIN_PASSWORD` | Password for the private `/admin` dashboard; username is `admin` |
 | `DATABASE_PATH` | SQLite file path; default `./battle.sqlite` |
 | `PORT` | HTTP port; default `3000` |
+| `PAY_MODE_ENABLED` | Enables the allowlisted devnet wallet API when exactly `true` |
+| `SOLANA_CLUSTER` | Must remain `devnet` in this build |
+| `SOLANA_RPC_URL` | Solana devnet RPC endpoint |
+| `TEST_USDC_MINT` | Six-decimal devnet test-token mint used as test USDC |
+| `PRIVY_APP_ID` | Privy project app ID |
+| `PRIVY_APP_SECRET` | Privy server API secret |
+| `PRIVY_TREASURY_WALLET_ID` | Privy wallet ID for the treasury after migration (optional during the first migration) |
+| `SOLANA_TREASURY_SECRET` | Legacy devnet treasury key, retained only for the one-time Privy import |
+| `WALLET_ENCRYPTION_KEY` | Legacy wallet encryption key, retained only while old player wallets are being imported into Privy |
+| `WALLET_ENCRYPTION_KEY` | Random 32+ character secret for wallet encryption |
+| `PAY_MODE_TESTERS` | Comma-separated Telegram user IDs allowed into the test |
+
+## Hidden Solana pay-mode test
+
+The repository contains a guarded payment layer for invited testers. It is locked to **Solana devnet** and refuses to start with `SOLANA_CLUSTER=mainnet-beta`. The public XP game remains unchanged while `PAY_MODE_ENABLED=false`.
+
+The test layer creates a separate Solana wallet for each allowlisted Telegram account, encrypts its private key with AES-256-GCM before writing it to SQLite, exposes the wallet and test-USDC token-account addresses through authenticated `GET /api/pay`, and can move test USDC into or out of the treasury. The treasury pays transaction fees, so player wallets do not need devnet SOL. Transfer records have unique battle/user/kind keys to make payment actions idempotent at the application level.
+
+Before enabling it, create a dedicated devnet treasury, fund it with devnet SOL, create or choose a six-decimal test token mint, and set the pay-mode variables above. Keep the treasury secret and encryption key only in Railway variables. Back up both before creating test wallets because losing the encryption key makes those wallets unrecoverable.
+
+This custodial implementation is for closed devnet testing. A mainnet release needs external key management or an embedded-wallet provider, withdrawal controls, reconciliation, abuse controls, legal review, and a security audit.
 
 ## Test
 

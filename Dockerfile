@@ -1,7 +1,8 @@
 FROM node:24-alpine
 RUN apk add --no-cache su-exec
 WORKDIR /app
-COPY package.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN npm install -g pnpm@11.19.0 && pnpm install --frozen-lockfile --prod
 COPY src ./src
 COPY public ./public
 COPY --chmod=755 entrypoint.sh /entrypoint.sh

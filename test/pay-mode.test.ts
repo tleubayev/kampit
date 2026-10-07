@@ -1,0 +1,59 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { Keypair } from '@solana/web3.js';
+import { Store } from '../src/store.ts';
+import { Engine } from '../src/engine.ts';
+import { decryptWallet, encryptWallet, payConfigFromEnv, validatePayConfig } from '../src/pay-mode.ts';
+
+test('wallet secrets are authenticated and decrypt only with the configured key', () => {
+  const wallet = Keypair.generate(), key = 'a'.repeat(32), encrypted = encryptWallet(wallet.secretKey, key);
+  assert.notEqual(encrypted, Buffer.from(wallet.secretKey).toString('base64'));
+  assert.deepEqual(decryptWallet(encrypted, key), wallet.secretKey);
+  assert.throws(() => decryptWallet(encrypted, 'b'.repeat(32)));
+});
+
+test('pay configuration is disabled by default and rejects non-devnet clusters', () => {
+  assert.equal(payConfigFromEnv({} as NodeJS.ProcessEnv).enabled, false);
+  assert.throws(() => payConfigFromEnv({ SOLANA_CLUSTER: 'mainnet-beta' } as NodeJS.ProcessEnv), /locked to Solana devnet/);
+});
+
+test('enabled pay mode requires secrets and an explicit tester allowlist', () => {
+  const treasury = Keypair.generate();
+  const base = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'https://api.devnet.solana.com', usdcMint: Keypair.generate().publicKey.toBase58(), treasurySecret: Buffer.from(treasury.secretKey).toString('base64'), encryptionKey: 'x'.repeat(32), privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: '', allowedUsers: new Set(['1']) };
+  assert.doesNotThrow(() => validatePayConfig(base));
+  assert.throws(() => validatePayConfig({ ...base, allowedUsers: new Set() }), /PAY_MODE_TESTERS/);
+});
+
+test('Privy wallet migration removes the locally stored private key', async () => {
+  const store = new Store(':memory:'); store.ensureAccount('1', 'Ali');
+  const legacy = Keypair.generate(), encryptionKey = 'x'.repeat(32);
+  store.db.prepare('INSERT INTO pay_wallets(user_id,address,encrypted_secret,created_at) VALUES(?,?,?,?)').run('1', legacy.publicKey.toBase58(), encryptWallet(legacy.secretKey, encryptionKey), 1);
+  const imported: unknown[] = [];
+  const privy = { create: async () => { throw new Error('unexpected create'); }, import: async (input: Record<string, unknown>) => { imported.push(input); return { id: 'privy-wallet-1', address: legacy.publicKey.toBase58() }; }, solana: () => ({ signTransaction: async () => ({ signed_transaction: '' }) }) };
+  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, { enabled: true, cluster: 'devnet', rpcUrl: 'http://localhost:8899', usdcMint: Keypair.generate().publicKey.toBase58(), treasurySecret: Buffer.from(Keypair.generate().secretKey).toString('base64'), encryptionKey, privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: '', allowedUsers: new Set(['1']) }, privy);
+  assert.equal((await service.wallet('1')).id, 'privy-wallet-1');
+  const row = store.db.prepare('SELECT encrypted_secret,privy_wallet_id FROM pay_wallets WHERE user_id=?').get('1') as { encrypted_secret: string; privy_wallet_id: string };
+  assert.equal(row.encrypted_secret, 'privy-managed'); assert.equal(row.privy_wallet_id, 'privy-wallet-1'); assert.equal(imported.length, 1); store.close();
+});
+
+test('payment tables enforce one transfer kind per user and battle', () => {
+  const store = new Store(':memory:'); store.ensureAccount('1', 'Ali');
+  store.db.prepare('INSERT INTO pay_wallets(user_id,address,encrypted_secret,created_at) VALUES(?,?,?,?)').run('1', Keypair.generate().publicKey.toBase58(), 'encrypted', 1);
+  const insert = store.db.prepare("INSERT INTO pay_transfers(battle_id,user_id,kind,amount_minor,signature,created_at) VALUES('b','1','stake',100000,'sig',1)");
+  insert.run(); assert.throws(() => insert.run()); store.close();
+});
+
+test('paid rounds use test-USDC readiness without changing XP balances', () => {
+  const store = new Store(':memory:'), engine = new Engine(store);
+  const battle = engine.createPaid('g', 100_000, '1', 1000);
+  engine.join(battle.id, '1', 'Ali'); engine.join(battle.id, '2', 'Dana');
+  engine.readyPaid(battle.id, '1', 1000); engine.readyPaid(battle.id, '2', 1000);
+  assert.equal(store.account('1')!.balance, 1000);
+  engine.startNow(battle.id, '1', 1000);
+  engine.tick(4000, { price: 100, at: 4000, sourceTime: '' });
+  engine.predict(battle.id, '1', 'LONG', 5000); engine.predict(battle.id, '2', 'SHORT', 5000);
+  engine.tick(64000, { price: 101, at: 64000, sourceTime: '' });
+  assert.equal(store.account('1')!.balance, 1000);
+  assert.equal(store.paidBattle(battle.id)!.settlement_status, 'pending');
+  store.close();
+});

@@ -11,6 +11,7 @@ import { verifyInitData, type TelegramIdentity } from './auth.ts';
 import { Bot } from './bot.ts';
 import { SlidingWindowRateLimiter } from './rate-limit.ts';
 import { publicAccount, publicBattle, publicPlayers, publicStats } from './public-view.ts';
+import { DevnetUsdcService, payConfigFromEnv, validatePayConfig } from './pay-mode.ts';
 
 if (existsSync('.env')) loadEnvFile('.env');
 const token = process.env.BOT_TOKEN || '';
@@ -23,11 +24,14 @@ if (!token || !username || !shortName || !appUrl || !webhookSecret || webhookSec
   console.error('Set BOT_TOKEN, BOT_USERNAME, MINI_APP_SHORT_NAME, APP_URL and WEBHOOK_SECRET (16+ chars).'); process.exit(1);
 }
 const store = new Store(process.env.DATABASE_PATH || './battle.sqlite', 'UTC');
+const payConfig = payConfigFromEnv();
+validatePayConfig(payConfig);
+const payMode = payConfig.enabled ? new DevnetUsdcService(store, payConfig) : null;
 store.grantDaily();
 store.db.exec('CREATE TABLE IF NOT EXISTS processed_updates (update_id INTEGER PRIMARY KEY);');
 const engine = new Engine(store);
 const feed = new CoinbasePriceFeed();
-const bot = new Bot(token, username, shortName, engine);
+const bot = new Bot(token, username, shortName, engine, payConfig.allowedUsers);
 const sessions = new Map<string, { identity: TelegramIdentity; expires: number }>();
 const streams = new Map<string, Set<{ res: ServerResponse; userId: string }>>();
 const pendingUpdates = new Map<number, Promise<void>>();
@@ -78,7 +82,7 @@ function view(id: string, userId: string) {
   const data = engine.snapshot(id);
   const now = Date.now();
   return {
-    battle: publicBattle(data.battle, userId),
+    battle: publicBattle(data.battle, userId, store.paidBattle(id)),
     players: publicPlayers(data.players, data.battle, userId, now),
     leaderboard: (data.leaderboard as any[]).map(row => publicStats(row)),
     me: publicStats(store.stats(data.battle.chat_id, userId) as any),
@@ -102,6 +106,24 @@ async function deliverResult(id: string) {
   finally { delivering.delete(id); }
 }
 engine.on('resolved', battle => void deliverResult(battle.id));
+async function settlePaidBattle(id: string) {
+  if (!payMode) return;
+  const paid = store.paidBattle(id); if (!paid || paid.settlement_status === 'settled') return;
+  const battle = engine.require(id); if (!['finished', 'void'].includes(battle.status)) return;
+  const entrants = store.players(id).filter(player => player.ready);
+  if (battle.status === 'void') {
+    for (const player of entrants) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
+  } else if (battle.outcome !== 'HOUSE') {
+    const winners = entrants.filter(player => player.prediction === battle.outcome);
+    if (!winners.length) for (const player of entrants) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
+    else {
+      const pool = entrants.length * paid.stake_minor;
+      for (let index = 0; index < winners.length; index++) await payMode.pay(winners[index].user_id, id, 'payout', Math.floor(pool / winners.length) + (index < pool % winners.length ? 1 : 0));
+    }
+  }
+  store.db.prepare("UPDATE paid_battles SET settlement_status='settled' WHERE battle_id=?").run(id); broadcast(id);
+}
+engine.on('resolved', battle => void settlePaidBattle(battle.id).catch(error => console.error('Test-USDC settlement:', error)));
 feed.start();
 function scheduleDaily() {
   const now = Date.now();
@@ -115,6 +137,11 @@ setInterval(() => {
   const rows = store.db.prepare("SELECT id FROM battles WHERE status IN ('finished','void') AND id NOT IN (SELECT battle_id FROM result_deliveries)").all() as { id: string }[];
   for (const row of rows) void deliverResult(row.id);
 }, 5000);
+setInterval(() => {
+  if (!payMode) return;
+  const rows = store.db.prepare("SELECT pb.battle_id AS id FROM paid_battles pb JOIN battles b ON b.id=pb.battle_id WHERE pb.settlement_status='pending' AND b.status IN ('finished','void')").all() as { id: string }[];
+  for (const row of rows) void settlePaidBattle(row.id).catch(error => console.error('Test-USDC settlement retry:', error));
+}, 10000);
 
 const publicDir = resolve('public');
 const server = createServer(async (req, res) => {
@@ -172,6 +199,17 @@ const server = createServer(async (req, res) => {
         const referralCount = (store.db.prepare('SELECT COUNT(*) AS count FROM accounts WHERE referred_by=?').get(account.user_id) as { count: number }).count;
         json(res, 200, { account: publicAccount(account), referralCount, referralLink: `https://t.me/${username}?start=ref_${account.referral_code}` }); return;
       }
+      if (req.method === 'GET' && path === '/api/pay') {
+        if (!payMode) throw new GameError('Test pay mode is disabled', 404);
+        payMode.assertTester(actorId);
+        const wallet = await payMode.wallet(actorId);
+        json(res, 200, { enabled: true, cluster: 'devnet', currency: 'test USDC', walletAddress: wallet.address, depositAddress: await payMode.depositAddress(actorId), balanceMinor: await payMode.balanceMinor(actorId) }); return;
+      }
+      if (req.method === 'POST' && path === '/api/pay/faucet') {
+        if (!payMode) throw new GameError('Test pay mode is disabled', 404);
+        const signature = await payMode.faucet(actorId);
+        json(res, 200, { signature, balanceMinor: await payMode.balanceMinor(actorId) }); return;
+      }
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);
       const id = parts[2];
@@ -189,7 +227,17 @@ const server = createServer(async (req, res) => {
       if (req.method === 'POST' && parts[3] === 'join') {
         engine.join(id, String(actor.user.id), [actor.user.first_name, actor.user.last_name].filter(Boolean).join(' ')); json(res, 200, view(id, String(actor.user.id))); return;
       }
-      if (req.method === 'POST' && parts[3] === 'ready') { engine.ready(id, String(actor.user.id)); json(res, 200, view(id, String(actor.user.id))); return; }
+      if (req.method === 'POST' && parts[3] === 'ready') {
+        const paid = store.paidBattle(id);
+        if (paid) {
+          if (!payMode) throw new GameError('Test pay mode is disabled', 503);
+          const player = store.players(id).find(item => item.user_id === actorId);
+          if (!player) throw new GameError('Join the lobby first');
+          if (!player.ready) await payMode.lockStake(id, actorId, paid.stake_minor);
+          engine.readyPaid(id, actorId);
+        } else engine.ready(id, actorId);
+        json(res, 200, view(id, actorId)); return;
+      }
       if (req.method === 'POST' && parts[3] === 'start') { engine.startNow(id, String(actor.user.id)); json(res, 200, view(id, String(actor.user.id))); return; }
       if (req.method === 'POST' && parts[3] === 'predict') {
         const data = await body(req);
