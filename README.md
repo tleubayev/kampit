@@ -59,6 +59,8 @@ The repository contains a guarded payment layer for invited testers. It is locke
 
 The test layer creates a separate Privy-managed Solana wallet for each allowlisted Telegram account, exposes its wallet and Circle test-USDC token-account addresses through authenticated `GET /api/pay`, and can move test USDC into or out of the treasury. The treasury pays transaction fees, so player wallets do not need devnet SOL. Transfer records have unique battle/user/kind keys to make payment actions idempotent at the application level.
 
+Every stake, payout and refund is stored as a durable payment intent before broadcast. The intent contains the fully signed transaction, deterministic Solana signature, blockhash and expiry height. After a restart, the service checks that signature through both RPC providers and rebroadcasts the same bytes while the blockhash remains valid. It creates a replacement only after expiry and successful absence checks from both providers. This closes the crash window between broadcasting a transfer and recording its result.
+
 The build hardcodes Circle's official Solana Devnet USDC mint, `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`; an environment variable cannot replace it with a lookalike token. Before enabling pay mode, fund the dedicated treasury with devnet SOL and use [Circle's faucet](https://faucet.circle.com/) to send test USDC to tester wallet addresses. Circle test tokens have no financial value.
 
 This custodial implementation is for closed devnet testing. A mainnet release needs external key management or an embedded-wallet provider, withdrawal controls, reconciliation, abuse controls, legal review, and a security audit.
