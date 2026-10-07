@@ -21,7 +21,7 @@ test('pay configuration is disabled by default and rejects non-devnet clusters',
 
 test('enabled pay mode requires secrets and an explicit tester allowlist', () => {
   const treasury = Keypair.generate();
-  const base = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'https://api.devnet.solana.com', treasurySecret: Buffer.from(treasury.secretKey).toString('base64'), encryptionKey: 'x'.repeat(32), privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: '', allowedUsers: new Set(['1']) };
+  const base = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'https://api.devnet.solana.com', fallbackRpcUrl: 'https://api.devnet.solana.com', treasurySecret: Buffer.from(treasury.secretKey).toString('base64'), encryptionKey: 'x'.repeat(32), privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: '', allowedUsers: new Set(['1']) };
   assert.doesNotThrow(() => validatePayConfig(base));
   assert.throws(() => validatePayConfig({ ...base, allowedUsers: new Set() }), /PAY_MODE_TESTERS/);
 });
@@ -32,7 +32,7 @@ test('Privy wallet migration removes the locally stored private key', async () =
   store.db.prepare('INSERT INTO pay_wallets(user_id,address,encrypted_secret,created_at) VALUES(?,?,?,?)').run('1', legacy.publicKey.toBase58(), encryptWallet(legacy.secretKey, encryptionKey), 1);
   const imported: unknown[] = [];
   const privy = { create: async () => { throw new Error('unexpected create'); }, import: async (input: Record<string, unknown>) => { imported.push(input); return { id: 'privy-wallet-1', address: legacy.publicKey.toBase58() }; }, solana: () => ({ signTransaction: async () => ({ signed_transaction: '' }) }) };
-  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, { enabled: true, cluster: 'devnet', rpcUrl: 'http://localhost:8899', treasurySecret: Buffer.from(Keypair.generate().secretKey).toString('base64'), encryptionKey, privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: '', allowedUsers: new Set(['1']) }, privy);
+  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, { enabled: true, cluster: 'devnet', rpcUrl: 'http://localhost:8899', fallbackRpcUrl: 'http://localhost:8898', treasurySecret: Buffer.from(Keypair.generate().secretKey).toString('base64'), encryptionKey, privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: '', allowedUsers: new Set(['1']) }, privy);
   assert.equal((await service.wallet('1')).id, 'privy-wallet-1');
   const row = store.db.prepare('SELECT encrypted_secret,privy_wallet_id FROM pay_wallets WHERE user_id=?').get('1') as { encrypted_secret: string; privy_wallet_id: string };
   assert.equal(row.encrypted_secret, 'privy-managed'); assert.equal(row.privy_wallet_id, 'privy-wallet-1'); assert.equal(imported.length, 1); store.close();

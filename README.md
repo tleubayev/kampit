@@ -44,6 +44,7 @@ Public API and live-event responses expose `isYou` and `isCreator` flags instead
 | `PAY_MODE_ENABLED` | Enables the allowlisted devnet wallet API when exactly `true` |
 | `SOLANA_CLUSTER` | Must remain `devnet` in this build |
 | `SOLANA_RPC_URL` | Solana devnet RPC endpoint |
+| `SOLANA_FALLBACK_RPC_URL` | Backup Solana devnet RPC used automatically if the primary RPC fails |
 | `PRIVY_APP_ID` | Privy project app ID |
 | `PRIVY_APP_SECRET` | Privy server API secret |
 | `PRIVY_TREASURY_WALLET_ID` | Privy wallet ID for the treasury after migration (optional during the first migration) |
