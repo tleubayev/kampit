@@ -39,7 +39,7 @@ async function action(name,data) {
   catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);} finally {requestBusy=false;}
 }
 window.doAction=action;
-window.claimTestUsdc=async()=>{try{const result=await api('/api/pay/faucet','POST');payInfo={...payInfo,balanceMinor:result.balanceMinor};if(state)render(state);}catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);}};
+window.openTestUsdcFaucet=()=>{const url='https://faucet.circle.com/';if(tg?.openLink)tg.openLink(url);else window.open(url,'_blank');};
 function showAccount(info) {
   accountInfo=info;
   el('balance').textContent=`${info.account.balance} XP`;
@@ -68,7 +68,7 @@ function render(data) {
     const readyCount=data.players.filter(p=>p.ready).length, creator=b.isCreator;
     const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
     const start=creator&&readyCount>=2?'<button class="primary" onclick="doAction(\'start\')">START NOW</button>':'';
-    const faucet=paid&&payInfo&&payInfo.balanceMinor<b.stakeMinor?'<button class="secondary" onclick="claimTestUsdc()">CLAIM 10 TEST USDC</button>':'';
+    const faucet=paid&&payInfo&&payInfo.balanceMinor<b.stakeMinor?'<button class="secondary" onclick="openTestUsdcFaucet()">GET TEST USDC FROM CIRCLE</button>':'';
     html=`<h1>${paid?'Devnet pay battle':'Join the battle'}</h1><p>${paid?'Test tokens have no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins with the first ready player. Unready players are excluded. ${readyCount} ready.</p>${faucet}${action}${start}`;
   }
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';

@@ -203,12 +203,7 @@ const server = createServer(async (req, res) => {
         if (!payMode) throw new GameError('Test pay mode is disabled', 404);
         payMode.assertTester(actorId);
         const wallet = await payMode.wallet(actorId);
-        json(res, 200, { enabled: true, cluster: 'devnet', currency: 'test USDC', walletAddress: wallet.address, depositAddress: await payMode.depositAddress(actorId), balanceMinor: await payMode.balanceMinor(actorId) }); return;
-      }
-      if (req.method === 'POST' && path === '/api/pay/faucet') {
-        if (!payMode) throw new GameError('Test pay mode is disabled', 404);
-        const signature = await payMode.faucet(actorId);
-        json(res, 200, { signature, balanceMinor: await payMode.balanceMinor(actorId) }); return;
+        json(res, 200, { enabled: true, cluster: 'devnet', currency: 'Circle test USDC', mintAddress: payMode.mint.toBase58(), walletAddress: wallet.address, depositAddress: await payMode.depositAddress(actorId), balanceMinor: await payMode.balanceMinor(actorId) }); return;
       }
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);
