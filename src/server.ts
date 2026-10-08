@@ -143,7 +143,7 @@ function scheduleDaily() {
   setTimeout(() => { store.grantDaily(); for (const id of streams.keys()) broadcast(id); scheduleDaily(); }, nextMidnight - now);
 }
 scheduleDaily();
-setInterval(() => { engine.tick(Date.now(), feed.fresh()); for (const id of streams.keys()) broadcast(id); }, 1000);
+setInterval(() => { try { engine.tick(Date.now(), feed.fresh()); for (const id of streams.keys()) broadcast(id); } catch (error) { console.error('Battle tick:', error); } }, 1000);
 setInterval(() => { for (const [key, value] of sessions) if (value.expires < Date.now()) sessions.delete(key); }, 60000);
 setInterval(() => {
   const rows = store.db.prepare("SELECT id FROM battles WHERE status IN ('finished','void') AND id NOT IN (SELECT battle_id FROM result_deliveries)").all() as { id: string }[];

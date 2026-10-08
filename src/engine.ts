@@ -172,7 +172,7 @@ export class Engine extends EventEmitter {
         const loss = !win;
         const xp = paid ? 0 : payout - (player.ready ? battle.stake : 0);
         this.store.db.prepare(`INSERT INTO stats(chat_id,user_id,name,wins,losses,ties,streak,xp) VALUES(?,?,?,?,?,?,?,?)
-          ON CONFLICT(chat_id,user_id) DO UPDATE SET name=excluded.name,wins=wins+excluded.wins,losses=losses+excluded.losses,ties=ties+excluded.ties,streak=CASE WHEN excluded.wins=1 THEN streak+1 ELSE 0 END,xp=xp+excluded.xp`)
+          ON CONFLICT(chat_id,user_id) DO UPDATE SET name=excluded.name,wins=stats.wins+excluded.wins,losses=stats.losses+excluded.losses,ties=stats.ties+excluded.ties,streak=CASE WHEN excluded.wins=1 THEN stats.streak+1 ELSE 0 END,xp=stats.xp+excluded.xp`)
           .run(battle.chat_id, player.user_id, player.name, win ? 1 : 0, loss ? 1 : 0, 0, win ? 1 : 0, xp);
       }
       this.store.db.exec('COMMIT');
