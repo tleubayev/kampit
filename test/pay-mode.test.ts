@@ -43,6 +43,7 @@ test('a restart after broadcast recovers the signed payment without sending twic
   const treasury = Keypair.generate(), user = Keypair.generate(), blockhash = Keypair.generate().publicKey.toBase58();
   store.db.prepare("INSERT INTO pay_wallets(user_id,address,encrypted_secret,privy_wallet_id,created_at) VALUES(?,?,'privy-managed','user-wallet',1)").run('1', user.publicKey.toBase58());
   store.db.prepare("INSERT INTO app_meta(key,value) VALUES('privy_treasury_address',?)").run(treasury.publicKey.toBase58());
+  store.db.prepare("INSERT INTO app_meta(key,value) VALUES('privy_fee_payer_wallet_id','treasury-wallet')").run(); store.db.prepare("INSERT INTO app_meta(key,value) VALUES('privy_fee_payer_address',?)").run(treasury.publicKey.toBase58());
   const config = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set(['1']) };
   const privy = { create: async () => { throw new Error('unexpected create'); }, import: async () => { throw new Error('unexpected import'); }, solana: () => ({ signTransaction: async (_id: string, input: { transaction: Uint8Array }) => { const transaction = Transaction.from(input.transaction); transaction.partialSign(treasury); return { signed_transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64') }; } }) };
   let sends = 0, landed = false; const payloads = new Set<string>();
@@ -77,6 +78,17 @@ test('withdrawals validate limits and appear in the confirmation history', async
   }
   await assert.rejects(() => service.withdraw('1', 'f'.repeat(16), Keypair.generate().publicKey.toBase58(), 100_000), /Daily withdrawal limit/);
   const history = service.history('1'); assert.equal(history.length, 5); assert.equal(history[0].kind, 'withdrawal'); assert.equal(history[0].state, 'confirmed'); assert.match(history[0].explorerUrl, /cluster=devnet/); store.close();
+});
+
+test('withdrawals over 5 test USDC require an admin decision', async () => {
+  const store = new Store(':memory:'); store.ensureAccount('1', 'Ali');
+  const config = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set(['1']) };
+  const privy = { create: async () => { throw new Error('unexpected'); }, import: async () => { throw new Error('unexpected'); }, solana: () => ({ signTransaction: async () => { throw new Error('unexpected'); } }) };
+  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, config, privy); (service as any).balanceMinor = async () => 10_000_000;
+  const id = 'a'.repeat(20), recipient = Keypair.generate().publicKey.toBase58();
+  assert.deepEqual(await service.withdraw('1', id, recipient, 6_000_000), { status: 'approval_required' });
+  assert.equal(service.pendingWithdrawals().length, 1); assert.equal(service.history('1')[0].state, 'pending');
+  assert.deepEqual(await service.decideWithdrawal(id, false), { status: 'rejected' }); assert.equal(service.pendingWithdrawals().length, 0); store.close();
 });
 
 test('paid rounds use test-USDC readiness without changing XP balances', () => {

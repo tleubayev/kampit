@@ -114,7 +114,8 @@ async function settlePaidBattle(id: string) {
   const entrants = store.players(id).filter(player => player.ready);
   if (battle.status === 'void') {
     for (const player of entrants) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
-  } else if (battle.outcome !== 'HOUSE') {
+  } else if (battle.outcome === 'HOUSE') await payMode.house(id, entrants.length * paid.stake_minor);
+  else {
     const winners = entrants.filter(player => player.prediction === battle.outcome);
     if (!winners.length) for (const player of entrants) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
     else {
@@ -169,6 +170,8 @@ const server = createServer(async (req, res) => {
       if (!requireAdmin(req, res)) return;
       json(res, 200, { ...store.dashboardMetrics(), health: { priceFresh: !!feed.fresh(), connectedPlayers: [...streams.values()].reduce((sum, clients) => sum + clients.size, 0), payments: paymentHealth }, generatedAt: Date.now() }); return;
     }
+    if (req.method === 'GET' && path === '/admin/withdrawals') { if (!requireAdmin(req, res)) return; json(res, 200, { withdrawals: payMode?.pendingWithdrawals() || [] }); return; }
+    if (req.method === 'POST' && path.startsWith('/admin/withdrawals/')) { if (!requireAdmin(req, res)) return; if (req.headers.origin && req.headers.origin !== new URL(appUrl).origin) throw new GameError('Wrong origin', 403); if (!payMode) throw new GameError('Test pay mode is disabled', 404); const parts = path.split('/').filter(Boolean), data = await body(req); const result = await payMode.decideWithdrawal(parts[2], data.approve === true); await reconcilePayments(); json(res, 200, result); return; }
     if (req.method === 'POST' && path === '/telegram/webhook') {
       if (req.headers['x-telegram-bot-api-secret-token'] !== webhookSecret) throw new GameError('Forbidden', 403);
       const update = await body(req) as any;
@@ -224,8 +227,8 @@ const server = createServer(async (req, res) => {
         if (!payMode) throw new GameError('Test pay mode is disabled', 404);
         enforceLimit(actionLimiter, actorId, 3, 60000);
         const data = await body(req);
-        const signature = await payMode.withdraw(actorId, String(data.requestId || ''), String(data.recipient || ''), Number(data.amountMinor));
-        json(res, 200, { signature, balanceMinor: await payMode.balanceMinor(actorId), transactions: payMode.history(actorId) }); return;
+        const result = await payMode.withdraw(actorId, String(data.requestId || ''), String(data.recipient || ''), Number(data.amountMinor));
+        json(res, 200, { ...result, balanceMinor: await payMode.balanceMinor(actorId), transactions: payMode.history(actorId) }); return;
       }
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);
