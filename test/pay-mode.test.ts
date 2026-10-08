@@ -110,6 +110,17 @@ test('welcome faucet gives each tester exactly 1 test USDC once', async () => {
   store.close();
 });
 
+test('stake fails before signing when the player has no test USDC token balance', async () => {
+  const store = new Store(':memory:'); store.ensureAccount('1', 'Ali');
+  const config = { enabled: true, publicAccess: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set<string>() };
+  const privy = { create: async () => { throw new Error('wallet creation should not run'); }, import: async () => { throw new Error('unexpected'); }, solana: () => ({ signTransaction: async () => { throw new Error('signing should not run'); } }) };
+  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, config, privy);
+  (service as any).balanceMinor = async () => 0;
+  await assert.rejects(() => service.lockStake('battle', '1', 100_000), /Claim 1 test USDC/);
+  assert.equal((store.db.prepare('SELECT COUNT(*) AS count FROM pay_intents').get() as any).count, 0);
+  store.close();
+});
+
 test('paid rounds use test-USDC readiness without changing XP balances', () => {
   const store = new Store(':memory:'), engine = new Engine(store);
   const battle = engine.createPaid('g', 100_000, '1', 1000);
