@@ -1,6 +1,6 @@
 # SOL Quick Battle
 
-A Telegram group game with one mode: synchronized 60-second SOL/USD rounds for 2–100 players. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. The first ready player starts a 30-second lobby window; at its end, two or more ready players proceed and unready joiners are excluded. Rematch switches the current Mini App window to the new lobby and posts a fresh group card for other players. Rooms have a creator-selected virtual XP stake of at least 10. There are no deposits, real-money stakes, or prizes.
+A Telegram group game with synchronized 60-second SOL/USD rounds. XP rooms support 2–100 players; Solana Devnet USDC rooms support 2–10. Players join from a group card, ready up, and pick LONG or SHORT during the first 10 seconds. The first ready player starts a 30-second lobby window; at its end, two or more ready players proceed and unready joiners are excluded. Rematch switches the current Mini App window to the new lobby and posts a fresh group card for other players. XP has no monetary value, and Devnet USDC is a test token with no monetary value.
 
 The public root URL presents a responsive Kampit landing page in ordinary browsers. The same URL detects verified Telegram Mini App context and opens the game interface instead, so the existing BotFather configuration does not need to change.
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Store, dailyDate } from '../src/store.ts';
-import { Engine, GameError, MAX_PAID_STAKE_MINOR, MAX_PLAYERS } from '../src/engine.ts';
+import { Engine, GameError, MAX_PAID_PLAYERS, MAX_PAID_STAKE_MINOR, MAX_PLAYERS } from '../src/engine.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,6 +23,14 @@ test('battle accepts 100 players and rejects the 101st', () => {
   engine.join(battle.id, '100', 'Renamed Player');
   assert.equal(store.players(battle.id).length, 100);
   assert.equal(store.players(battle.id).at(-1)?.name, 'Renamed Player');
+  store.close();
+});
+
+test('paid battle accepts 10 players and rejects the 11th', () => {
+  const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000, '1');
+  for (let i = 1; i <= MAX_PAID_PLAYERS; i++) engine.join(battle.id, String(i), `Player ${i}`);
+  assert.equal(store.players(battle.id).length, 10);
+  assert.throws(() => engine.join(battle.id, '11', 'Player 11'), /full \(10 players\)/);
   store.close();
 });
 

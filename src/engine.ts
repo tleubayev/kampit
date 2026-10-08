@@ -4,6 +4,7 @@ import { Store, type Battle, type Side } from './store.ts';
 import type { Quote } from './price.ts';
 
 export const MAX_PLAYERS = 100;
+export const MAX_PAID_PLAYERS = 10;
 export const MAX_PAID_STAKE_MINOR = 20_000_000;
 export const LOBBY_READY_MS = 30_000;
 export const LOBBY_MAX_MS = 5 * 60_000;
@@ -27,7 +28,7 @@ export class Engine extends EventEmitter {
     return battle;
   }
   createPaid(chatId: string, stakeMinor: number, creatorUserId: string, now = Date.now()): Battle {
-    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000 || stakeMinor > MAX_PAID_STAKE_MINOR || !Number.isSafeInteger(stakeMinor * MAX_PLAYERS)) throw new GameError('Test stake must be between 0.10 and 20.00 USDC');
+    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000 || stakeMinor > MAX_PAID_STAKE_MINOR || !Number.isSafeInteger(stakeMinor * MAX_PAID_PLAYERS)) throw new GameError('Test stake must be between 0.10 and 20.00 USDC');
     const existing = this.store.active(chatId); if (existing) return existing;
     const id = randomBytes(8).toString('hex');
     this.store.db.exec('BEGIN IMMEDIATE');
@@ -63,7 +64,8 @@ export class Engine extends EventEmitter {
       const existing = this.store.db.prepare('SELECT 1 FROM players WHERE battle_id=? AND user_id=?').get(id, userId);
       if (!existing) {
         const count = (this.store.db.prepare('SELECT COUNT(*) AS count FROM players WHERE battle_id=?').get(id) as { count: number }).count;
-        if (count >= MAX_PLAYERS) throw new GameError(`Battle is full (${MAX_PLAYERS} players)`, 409);
+        const limit = this.store.paidBattle(id) ? MAX_PAID_PLAYERS : MAX_PLAYERS;
+        if (count >= limit) throw new GameError(`Battle is full (${limit} players)`, 409);
       }
       this.store.ensureAccount(userId, clean);
       this.store.db.prepare('INSERT INTO players(battle_id,user_id,name) VALUES(?,?,?) ON CONFLICT(battle_id,user_id) DO UPDATE SET name=excluded.name').run(id, userId, clean);

@@ -46,7 +46,7 @@ export class Bot {
     const stakeLabel = paid ? `${(paid.stake_minor / 1_000_000).toFixed(2)} TEST USDC` : `${battle.stake} XP`;
     const sent = await this.call('sendMessage', {
       chat_id: battle.chat_id,
-      text: `⚔️ SOL QUICK BATTLE · ${stakeLabel} STAKE${paid ? '\n🧪 SOLANA DEVNET · TOKENS HAVE NO VALUE' : ''}\n\nReady up to lock ${stakeLabel}. The lobby runs for 30 seconds after the first player readies up; unready players are excluded. Predict SOL/USD over 60 seconds. 2–100 players.`,
+      text: `⚔️ SOL QUICK BATTLE · ${stakeLabel} STAKE${paid ? '\n🧪 SOLANA DEVNET · TOKENS HAVE NO VALUE' : ''}\n\nReady up to lock ${stakeLabel}. The lobby runs for 30 seconds after the first player readies up; unready players are excluded. Predict SOL/USD over 60 seconds. 2–${paid ? 10 : 100} players.`,
       reply_markup: { inline_keyboard: [[{ text: '⚔️ JOIN BATTLE', url: this.link(battle.id) }]] }
     });
     this.engine.store.db.prepare('UPDATE battles SET message_id=? WHERE id=?').run(sent.message_id, battle.id);
@@ -117,7 +117,7 @@ export class Bot {
       this.engine.store.ensureAccount(String(message.from.id), message.from.first_name);
       await this.call('sendMessage', { chat_id: chatId, text: `${awarded ? 'Invitation accepted. ' : ''}You have 1000 starting XP. Add me to a group and send /battle to choose a stake and play.` });
     } else if (command === '/help') {
-      await this.call('sendMessage', { chat_id: chatId, text: 'Add this bot to a group and send /battle to choose a stake of at least 10 XP. Battles support 2–100 players. The lobby runs for 30 seconds after the first player readies up, and unready players are excluded. Pick LONG or SHORT in the first 10 seconds of a 60-second round. Every account receives 100 XP daily at 00:00 UTC.' });
+      await this.call('sendMessage', { chat_id: chatId, text: 'Add this bot to a group. Use /battle for 2–100 player XP games or /paybattle for 2–10 player Solana Devnet games. The lobby runs for 30 seconds after the first player readies up, and unready players are excluded. Pick LONG or SHORT in the first 10 seconds of a 60-second round. Every account receives 100 XP daily at 00:00 UTC.' });
     }
   }
   async startBattle(message: TgMessage, creator: TgUser, stake: number) {

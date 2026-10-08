@@ -17,6 +17,7 @@ export function publicBattle(battle: Battle, userId: string, paid?: { stake_mino
     outcome: battle.outcome,
     stake: battle.stake,
     mode: paid ? 'USDC_TEST' : 'XP',
+    maxPlayers: paid ? 10 : 100,
     stakeMinor: paid?.stake_minor,
     settlementStatus: paid?.settlement_status,
     isCreator: battle.creator_user_id === userId,
