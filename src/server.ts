@@ -26,19 +26,21 @@ if (!token || !username || !shortName || !appUrl || !webhookSecret || webhookSec
 const store = new Store(process.env.DATABASE_PATH || './battle.sqlite', 'UTC');
 const payConfig = payConfigFromEnv();
 validatePayConfig(payConfig);
+if (payConfig.enabled && adminPassword.length < 16) { console.error('ADMIN_PASSWORD (16+ chars) is required when pay mode is enabled.'); process.exit(1); }
 const payMode = payConfig.enabled ? new DevnetUsdcService(store, payConfig) : null;
 store.grantDaily();
 store.db.exec('CREATE TABLE IF NOT EXISTS processed_updates (update_id INTEGER PRIMARY KEY);');
 const engine = new Engine(store);
 const feed = new CoinbasePriceFeed();
 const bot = new Bot(token, username, shortName, engine, payConfig.allowedUsers);
-const sessions = new Map<string, { identity: TelegramIdentity; expires: number }>();
-const streams = new Map<string, Set<{ res: ServerResponse; userId: string }>>();
+const sessions = new Map<string, { identity: TelegramIdentity; expires: number; battles: Set<string> }>();
+const streams = new Map<string, Set<{ res: ServerResponse; userId: string; sessionKey: string }>>();
 const pendingUpdates = new Map<number, Promise<void>>();
 const delivering = new Set<string>();
 const apiLimiter = new SlidingWindowRateLimiter();
 const actionLimiter = new SlidingWindowRateLimiter();
 const sessionLimiter = new SlidingWindowRateLimiter();
+const adminLimiter = new SlidingWindowRateLimiter();
 let paymentHealth: Awaited<ReturnType<DevnetUsdcService['reconcile']>> | null = null;
 
 function enforceLimit(limiter: SlidingWindowRateLimiter, key: string, limit: number, windowMs = 60_000) {
@@ -54,7 +56,6 @@ function sameSecret(left: string, right: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 function adminAuthorized(req: IncomingMessage) {
-  if (req.headers.authorization === `Bearer ${webhookSecret}`) return true;
   if (!adminPassword || !req.headers.authorization?.startsWith('Basic ')) return false;
   try {
     const decoded = Buffer.from(req.headers.authorization.slice(6), 'base64').toString('utf8');
@@ -63,16 +64,27 @@ function adminAuthorized(req: IncomingMessage) {
   } catch { return false; }
 }
 function requireAdmin(req: IncomingMessage, res: ServerResponse) {
+  const remote = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  const rate = adminLimiter.take(`admin:${remote}`, 10, 5 * 60_000);
+  if (!rate.allowed) { json(res, 429, { error: 'Too many admin login attempts' }); return false; }
   if (adminAuthorized(req)) return true;
   res.setHeader('www-authenticate', 'Basic realm="Kampit Admin", charset="UTF-8"');
   json(res, 401, { error: 'Admin login required' });
   return false;
 }
-function cookie(req: IncomingMessage) { return /(?:^|; )session=([^;]+)/.exec(req.headers.cookie || '')?.[1]; }
+function cookie(req: IncomingMessage) { return /(?:^|; )__Host-session=([^;]+)/.exec(req.headers.cookie || '')?.[1]; }
 function identity(req: IncomingMessage) {
   const key = cookie(req); const session = key && sessions.get(key);
   if (!session || session.expires < Date.now()) throw new GameError('Please reopen the Mini App in Telegram', 401);
   return session.identity;
+}
+function requireBattleAccess(req: IncomingMessage, id: string) {
+  const key = cookie(req); const session = key && sessions.get(key);
+  if (!session || !session.battles.has(id)) throw new GameError('Open this battle from its Telegram battle card', 403);
+  return { key: key!, session };
+}
+function requireAppOrigin(req: IncomingMessage) {
+  if (req.headers.origin !== new URL(appUrl).origin) throw new GameError('Wrong origin', 403);
 }
 async function body(req: IncomingMessage) {
   let text = '';
@@ -111,7 +123,9 @@ async function settlePaidBattle(id: string) {
   if (!payMode) return;
   const paid = store.paidBattle(id); if (!paid || paid.settlement_status === 'settled') return;
   const battle = engine.require(id); if (!['finished', 'void'].includes(battle.status)) return;
-  const entrants = store.players(id).filter(player => player.ready);
+  const confirmed = store.db.prepare("SELECT user_id FROM pay_transfers WHERE battle_id=? AND kind='stake'").all(id) as { user_id: string }[];
+  const confirmedIds = new Set(confirmed.map(row => row.user_id));
+  const entrants = store.players(id).filter(player => confirmedIds.has(player.user_id));
   if (battle.status === 'void') {
     for (const player of entrants) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
   } else if (battle.outcome === 'HOUSE') await payMode.house(id, entrants.length * paid.stake_minor);
@@ -158,6 +172,11 @@ if (payMode) { void reconcilePayments(); setInterval(() => void reconcilePayment
 const publicDir = resolve('public');
 const server = createServer(async (req, res) => {
   try {
+    res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    res.setHeader('referrer-policy', 'no-referrer');
+    res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('x-content-type-options', 'nosniff');
+    res.setHeader('content-security-policy', "default-src 'self'; script-src 'self' https://telegram.org 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const url = new URL(req.url || '/', appUrl);
     const path = url.pathname;
     if (req.method === 'GET' && path === '/health') { json(res, 200, { ok: true, priceFresh: !!feed.fresh() }); return; }
@@ -171,9 +190,9 @@ const server = createServer(async (req, res) => {
       json(res, 200, { ...store.dashboardMetrics(), health: { priceFresh: !!feed.fresh(), connectedPlayers: [...streams.values()].reduce((sum, clients) => sum + clients.size, 0), payments: paymentHealth }, generatedAt: Date.now() }); return;
     }
     if (req.method === 'GET' && path === '/admin/withdrawals') { if (!requireAdmin(req, res)) return; json(res, 200, { withdrawals: payMode?.pendingWithdrawals() || [] }); return; }
-    if (req.method === 'POST' && path.startsWith('/admin/withdrawals/')) { if (!requireAdmin(req, res)) return; if (req.headers.origin && req.headers.origin !== new URL(appUrl).origin) throw new GameError('Wrong origin', 403); if (!payMode) throw new GameError('Test pay mode is disabled', 404); const parts = path.split('/').filter(Boolean), data = await body(req); const result = await payMode.decideWithdrawal(parts[2], data.approve === true); await reconcilePayments(); json(res, 200, result); return; }
+    if (req.method === 'POST' && path.startsWith('/admin/withdrawals/')) { if (!requireAdmin(req, res)) return; requireAppOrigin(req); if (!payMode) throw new GameError('Test pay mode is disabled', 404); const parts = path.split('/').filter(Boolean), data = await body(req); const result = await payMode.decideWithdrawal(parts[2], data.approve === true); await reconcilePayments(); json(res, 200, result); return; }
     if (req.method === 'POST' && path === '/telegram/webhook') {
-      if (req.headers['x-telegram-bot-api-secret-token'] !== webhookSecret) throw new GameError('Forbidden', 403);
+      if (!sameSecret(String(req.headers['x-telegram-bot-api-secret-token'] || ''), webhookSecret)) throw new GameError('Forbidden', 403);
       const update = await body(req) as any;
       if (!Number.isSafeInteger(update.update_id)) throw new GameError('Invalid update');
       const seen = store.db.prepare('SELECT 1 FROM processed_updates WHERE update_id=?').get(update.update_id);
@@ -193,18 +212,22 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.svg') ? 'image/svg+xml' : 'text/css; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' }); res.end(content); return;
     }
     if (req.method === 'POST' && path === '/api/session') {
+      requireAppOrigin(req);
+      const remote = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+      enforceLimit(sessionLimiter, `ip:${remote}`, 30, 60_000);
       const data = await body(req);
       const verified = verifyInitData(String(data.initData || ''), token);
       const userId = String(verified.user.id);
       enforceLimit(sessionLimiter, userId, 10);
       store.ensureAccount(userId, [verified.user.first_name, verified.user.last_name].filter(Boolean).join(' '));
       const key = randomBytes(32).toString('hex');
-      sessions.set(key, { identity: verified, expires: Date.now() + 86400000 });
-      res.setHeader('set-cookie', `session=${key}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400${appUrl.startsWith('https:') ? '; Secure' : ''}`);
+      const battles = new Set<string>(); if (verified.startParam && /^[a-f0-9]{16}$/.test(verified.startParam)) battles.add(verified.startParam);
+      sessions.set(key, { identity: verified, expires: Date.now() + 86400000, battles });
+      res.setHeader('set-cookie', `__Host-session=${key}; HttpOnly; Path=/; SameSite=Strict; Max-Age=86400${appUrl.startsWith('https:') ? '; Secure' : ''}`);
       json(res, 200, { startParam: verified.startParam }); return;
     }
     if (path.startsWith('/api/')) {
-      if (req.method === 'POST' && req.headers.origin && req.headers.origin !== new URL(appUrl).origin) throw new GameError('Wrong origin', 403);
+      if (req.method === 'POST') requireAppOrigin(req);
       const actor = identity(req);
       const actorId = String(actor.user.id);
       enforceLimit(apiLimiter, actorId, 60);
@@ -233,12 +256,16 @@ const server = createServer(async (req, res) => {
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);
       const id = parts[2];
+      const access = requireBattleAccess(req, id);
       if (req.method === 'POST') enforceLimit(actionLimiter, actorId, 10);
       if (req.method === 'GET' && parts.length === 3) { json(res, 200, view(id, String(actor.user.id))); return; }
       if (req.method === 'GET' && parts[3] === 'events') {
         engine.require(id);
+        const allStreams = [...streams.values()].reduce((count, set) => count + set.size, 0);
+        const sessionStreams = [...streams.values()].reduce((count, set) => count + [...set].filter(client => client.sessionKey === access.key).length, 0);
+        if (allStreams >= 500 || (streams.get(id)?.size || 0) >= 200 || sessionStreams >= 3) throw new GameError('Too many live connections', 429);
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
-        const client = { res, userId: String(actor.user.id) };
+        const client = { res, userId: String(actor.user.id), sessionKey: access.key };
         if (!streams.has(id)) streams.set(id, new Set());
         streams.get(id)!.add(client);
         res.write(`data: ${JSON.stringify(view(id, client.userId))}\n\n`);
@@ -265,6 +292,7 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === 'POST' && parts[3] === 'rematch') {
         const next = engine.rematch(id, String(actor.user.id));
+        access.session.battles.add(next.id);
         if (!next.message_id) void bot.card(next).catch(error => console.error('Rematch card:', error));
         json(res, 200, { id: next.id }); return;
       }

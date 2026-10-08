@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Store, dailyDate } from '../src/store.ts';
-import { Engine, GameError, MAX_PLAYERS } from '../src/engine.ts';
+import { Engine, GameError, MAX_PAID_STAKE_MINOR, MAX_PLAYERS } from '../src/engine.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -196,5 +196,12 @@ test('migrated Telegram groups keep their battles and merged leaderboard', () =>
   assert.equal((store.stats('-100456', '1') as any).wins, 3);
   assert.equal((store.stats('-100456', '1') as any).xp, 30);
   assert.equal(store.stats('-123', '1'), undefined);
+  store.close();
+});
+
+test('paid battle stake is capped before a room is created', () => {
+  const { store, engine } = fixture();
+  assert.throws(() => engine.createPaid('g', MAX_PAID_STAKE_MINOR + 1, '1'), /between 0.10 and 20.00/);
+  assert.equal((store.db.prepare('SELECT COUNT(*) AS count FROM battles').get() as any).count, 0);
   store.close();
 });

@@ -105,3 +105,13 @@ test('paid rounds use test-USDC readiness without changing XP balances', () => {
   assert.equal(store.paidBattle(battle.id)!.settlement_status, 'pending');
   store.close();
 });
+
+test('rejects a transaction modified by the wallet signer', async () => {
+  const store = new Store(':memory:'), treasury = Keypair.generate();
+  const config = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set(['1']) };
+  const privy = { create: async () => { throw new Error('unexpected'); }, import: async () => { throw new Error('unexpected'); }, solana: () => ({ signTransaction: async (_id: string, input: { transaction: Uint8Array }) => { const changed = Transaction.from(input.transaction); changed.recentBlockhash = Keypair.generate().publicKey.toBase58(); changed.partialSign(treasury); return { signed_transaction: changed.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64') }; } }) };
+  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, config, privy);
+  const transaction = new Transaction({ feePayer: treasury.publicKey, recentBlockhash: Keypair.generate().publicKey.toBase58() });
+  await assert.rejects(() => (service as any).sign(transaction, ['treasury-wallet']), /modified transaction/);
+  store.close();
+});

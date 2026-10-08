@@ -4,6 +4,7 @@ import { Store, type Battle, type Side } from './store.ts';
 import type { Quote } from './price.ts';
 
 export const MAX_PLAYERS = 100;
+export const MAX_PAID_STAKE_MINOR = 20_000_000;
 export const LOBBY_READY_MS = 30_000;
 export const LOBBY_MAX_MS = 5 * 60_000;
 const COUNTDOWN_MS = 3_000;
@@ -26,7 +27,7 @@ export class Engine extends EventEmitter {
     return battle;
   }
   createPaid(chatId: string, stakeMinor: number, creatorUserId: string, now = Date.now()): Battle {
-    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000) throw new GameError('Minimum test stake is 0.10 USDC');
+    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000 || stakeMinor > MAX_PAID_STAKE_MINOR || !Number.isSafeInteger(stakeMinor * MAX_PLAYERS)) throw new GameError('Test stake must be between 0.10 and 20.00 USDC');
     const existing = this.store.active(chatId); if (existing) return existing;
     const id = randomBytes(8).toString('hex');
     this.store.db.exec('BEGIN IMMEDIATE');

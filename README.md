@@ -38,7 +38,7 @@ Public API and live-event responses expose `isYou` and `isCreator` flags instead
 | `MINI_APP_SHORT_NAME` | Short name configured in BotFather |
 | `APP_URL` | Public HTTPS origin used for webhook registration |
 | `WEBHOOK_SECRET` | Random 16+ character Telegram webhook secret |
-| `ADMIN_PASSWORD` | Password for the private `/admin` dashboard; username is `admin` |
+| `ADMIN_PASSWORD` | Unique 16+ character password for the private `/admin` dashboard; username is `admin`; never reuse `WEBHOOK_SECRET` |
 | `DATABASE_PATH` | SQLite file path; default `./battle.sqlite` |
 | `PORT` | HTTP port; default `3000` |
 | `PAY_MODE_ENABLED` | Enables the allowlisted devnet wallet API when exactly `true` |
@@ -82,6 +82,8 @@ Build with `docker build -t sol-quick-battle .`, then run the container behind H
 The service can run on one Railway service with a volume. Deploy the repository's Dockerfile (or upload the local project with `railway up`), keep one replica and Serverless disabled, attach a volume at `/data`, and generate a public domain. Set `DATABASE_PATH=/data/battle.sqlite`, `BOT_USERNAME=Kampit_robot`, `MINI_APP_SHORT_NAME=play`, `APP_URL=https://<generated-domain>`, plus `BOT_TOKEN` and a random `WEBHOOK_SECRET` as service variables. Set the healthcheck path to `/health`. Configure the named Mini App `play` in BotFather with the same HTTPS origin; then restart the service so it registers the webhook.
 
 Set `ADMIN_PASSWORD` to enable the private aggregate dashboard at `/admin`. Log in with username `admin`. The dashboard returns counts and trends only and never exposes Telegram identities.
+
+Security-sensitive production credentials belong in Railway variables or another secret manager, never in a local `.env`, repository, screenshot, or support archive. The Telegram webhook secret authenticates Telegram only and cannot access admin routes. Rotate a credential after any suspected disclosure.
 
 Railway's trial and Free plan have usage limits; monitor usage before relying on the bot for ongoing play. The CLI respects `.gitignore`, and `.railwayignore` independently excludes the local token file from uploads.
 
