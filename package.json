@@ -10,12 +10,14 @@
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "dev": "node --watch --disable-warning=ExperimentalWarning src/server.ts",
     "test": "node --test --disable-warning=ExperimentalWarning test/*.test.ts",
+    "db:migrate:postgres": "node --disable-warning=ExperimentalWarning scripts/migrate-sqlite-to-postgres.ts",
     "setup:devnet": "node --disable-warning=ExperimentalWarning scripts/setup-devnet.ts"
   },
   "dependencies": {
     "@privy-io/node": "^0.35.0",
     "@solana/spl-token": "^0.4.15",
-    "@solana/web3.js": "^1.99.0"
+    "@solana/web3.js": "^1.99.0",
+    "postgres": "^3.4.7"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [
