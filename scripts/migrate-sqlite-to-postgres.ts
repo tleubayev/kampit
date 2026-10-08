@@ -29,7 +29,8 @@ await pg.begin(async tx => {
     const rows = sqliteRows(table);
     if (!rows.length) continue;
     const normalized = rows.map((row, index) => table === 'players' ? { ...row, joined_at: index } : row);
-    await tx(table, normalized);
+    const columns = Object.keys(normalized[0]);
+    await tx`INSERT INTO ${tx(table)} ${tx(normalized, columns)}`;
   }
   await tx`INSERT INTO schema_migrations(version,applied_at) VALUES('sqlite-import-v1',${Date.now()}) ON CONFLICT(version) DO UPDATE SET applied_at=EXCLUDED.applied_at`;
 });
