@@ -12,6 +12,7 @@ import { Bot } from './bot.ts';
 import { SlidingWindowRateLimiter } from './rate-limit.ts';
 import { publicAccount, publicBattle, publicPlayers, publicStats } from './public-view.ts';
 import { DevnetUsdcService, payConfigFromEnv, validatePayConfig } from './pay-mode.ts';
+import { paidDistribution } from './paid-settlement.ts';
 
 if (existsSync('.env')) loadEnvFile('.env');
 const token = process.env.BOT_TOKEN || '';
@@ -127,17 +128,11 @@ async function settlePaidBattle(id: string) {
   const confirmed = store.db.prepare("SELECT user_id FROM pay_transfers WHERE battle_id=? AND kind='stake'").all(id) as { user_id: string }[];
   const confirmedIds = new Set(confirmed.map(row => row.user_id));
   const entrants = store.players(id).filter(player => confirmedIds.has(player.user_id));
-  if (battle.status === 'void') {
-    for (const player of entrants) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
-  } else if (battle.outcome === 'HOUSE') await payMode.house(id, entrants.length * paid.stake_minor);
-  else {
-    const winners = entrants.filter(player => player.prediction === battle.outcome);
-    if (!winners.length) for (const player of entrants) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
-    else {
-      const pool = entrants.length * paid.stake_minor;
-      for (let index = 0; index < winners.length; index++) await payMode.pay(winners[index].user_id, id, 'payout', Math.floor(pool / winners.length) + (index < pool % winners.length ? 1 : 0));
-    }
-  }
+  const winners = entrants.filter(player => player.prediction === battle.outcome);
+  const distribution = paidDistribution(entrants.map(player => player.user_id), winners.map(player => player.user_id), paid.stake_minor, battle.outcome === 'HOUSE', battle.status === 'void');
+  if (distribution.houseMinor) await payMode.house(id, distribution.houseMinor);
+  for (const [userId, amountMinor] of distribution.payouts) await payMode.pay(userId, id, 'payout', amountMinor);
+  for (const [userId, amountMinor] of distribution.refunds) await payMode.pay(userId, id, 'refund', amountMinor);
   store.db.prepare("UPDATE paid_battles SET settlement_status='settled' WHERE battle_id=?").run(id); broadcast(id);
 }
 engine.on('resolved', battle => void settlePaidBattle(battle.id).catch(error => console.error('Test-USDC settlement:', error)));

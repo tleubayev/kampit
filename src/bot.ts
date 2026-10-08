@@ -59,7 +59,7 @@ export class Bot {
     const poolLabel = paid ? `${(pool / 1_000_000).toFixed(2)} test USDC` : `${pool} XP`;
     const text = battle.status === 'void'
       ? `⚠️ SOL QUICK BATTLE VOID\nAll staked ${paid ? 'test USDC' : 'XP'} was refunded.`
-      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${battle.outcome} WINS`}\n\nSOL/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${poolLabel} retained by the test house.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `Winners split ${poolLabel}: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
+      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${battle.outcome} WINS`}\n\nSOL/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${poolLabel} retained by the test house.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `${paid ? 'Winners split the pool after the 1% house fee' : `Winners split ${poolLabel}`}: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
     await this.call('sendMessage', { chat_id: battle.chat_id, text,
       reply_markup: { inline_keyboard: [[{ text: 'VIEW RESULT / REMATCH', url: this.link(battle.id) }]] } });
   }
