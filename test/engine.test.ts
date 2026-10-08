@@ -34,6 +34,17 @@ test('paid battle accepts 10 players and rejects the 11th', () => {
   store.close();
 });
 
+test('ten-player paid round advances with all funded players', () => {
+  const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000, '1', 1000);
+  for (let i = 1; i <= MAX_PAID_PLAYERS; i++) { engine.join(battle.id, String(i), `Player ${i}`); engine.readyPaid(battle.id, String(i), 1000 + i); }
+  assert.equal(store.players(battle.id).filter(player => player.ready).length, 10);
+  engine.startNow(battle.id, '1', 2000); engine.tick(5000, quote(100, 5000));
+  for (let i = 1; i <= MAX_PAID_PLAYERS; i++) engine.predict(battle.id, String(i), i % 2 ? 'LONG' : 'SHORT', 6000);
+  engine.tick(65000, quote(101, 65000));
+  assert.equal(engine.require(battle.id).status, 'finished'); assert.equal(engine.require(battle.id).outcome, 'LONG');
+  store.close();
+});
+
 test('stake is fixed, reserved on ready, and winners split the full pool', () => {
   const { store, engine } = fixture();
   assert.throws(() => engine.create('g', 9, '1', 1000), GameError);

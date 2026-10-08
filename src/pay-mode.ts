@@ -11,6 +11,7 @@ export const WITHDRAWAL_MAX_MINOR = 20_000_000;
 export const WITHDRAWAL_DAILY_LIMIT_MINOR = 100_000_000;
 export const WITHDRAWAL_APPROVAL_THRESHOLD_MINOR = 5_000_000;
 export const DEVNET_FAUCET_AMOUNT_MINOR = 1_000_000;
+export const MAX_PAYMENT_CONCURRENCY = 4;
 export type PayConfig = { enabled: boolean; publicAccess: boolean; cluster: 'devnet'; rpcUrl: string; fallbackRpcUrl: string; treasurySecret: string; encryptionKey: string; privyAppId: string; privyAppSecret: string; privyTreasuryWalletId: string; allowedUsers: Set<string> };
 type ManagedWallet = { id: string; address: string };
 type PaymentKind = 'stake' | 'payout' | 'refund' | 'withdrawal' | 'house';
@@ -41,6 +42,14 @@ export class DevnetUsdcService {
   private async rpc<T>(operation: (connection: Connection) => Promise<T>) { try { return await operation(this.connection); } catch (primaryError) { if (this.config.fallbackRpcUrl === this.config.rpcUrl) throw primaryError; return operation(this.fallbackConnection); } }
   private payments = new Map<string, Promise<string>>();
   private withdrawals = new Map<string, Promise<{ status: string; signature?: string }>>();
+  private paymentSlots = 0;
+  private paymentWaiters: (() => void)[] = [];
+  private async withPaymentSlot<T>(operation: () => Promise<T>) {
+    if (this.paymentSlots >= MAX_PAYMENT_CONCURRENCY) await new Promise<void>(resolve => this.paymentWaiters.push(resolve));
+    this.paymentSlots++;
+    try { return await operation(); }
+    finally { this.paymentSlots--; this.paymentWaiters.shift()?.(); }
+  }
   assertTester(userId: string) { if (!this.config.enabled || (!this.config.publicAccess && !this.config.allowedUsers.has(userId))) throw new GameError('Test pay mode is not enabled for this account', 403); }
   async wallet(userId: string): Promise<ManagedWallet> {
     this.assertTester(userId);
@@ -104,7 +113,7 @@ export class DevnetUsdcService {
     await this.rpc(connection => connection.confirmTransaction({ signature, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight }, 'confirmed'));
     this.recordConfirmed(signedIntent, signature); return signature;
   }
-  private payment(battleId: string, userId: string, kind: PaymentKind, amountMinor: number, resolveParties: () => Promise<[ManagedWallet, PublicKey]>) { if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new GameError('Invalid USDC amount'); const key = `${battleId}:${userId}:${kind}`; const active = this.payments.get(key); if (active) return active; const task = (async () => { const prior = this.store.db.prepare('SELECT amount_minor,signature FROM pay_transfers WHERE battle_id=? AND user_id=? AND kind=?').get(battleId, userId, kind) as { amount_minor: number; signature: string } | undefined; if (prior) { if (prior.amount_minor !== amountMinor) throw new Error('Recorded payment amount mismatch'); this.store.db.prepare("INSERT OR IGNORE INTO pay_intents(battle_id,user_id,kind,amount_minor,state,signature,updated_at) VALUES(?,?,?,?,'confirmed',?,?)").run(battleId, userId, kind, amountMinor, prior.signature, Date.now()); return prior.signature; } this.store.db.prepare('INSERT OR IGNORE INTO pay_intents(battle_id,user_id,kind,amount_minor,updated_at) VALUES(?,?,?,?,?)').run(battleId, userId, kind, amountMinor, Date.now()); const intent = this.intent(battleId, userId, kind)!; if (intent.amount_minor !== amountMinor) throw new Error('Payment intent amount mismatch'); try { const [owner, destination] = await resolveParties(); return await this.executePayment(intent, owner, destination); } catch (error) { if (error instanceof Error && error.message.includes('failed on chain')) this.store.db.prepare("UPDATE pay_intents SET state='failed',updated_at=? WHERE battle_id=? AND user_id=? AND kind=?").run(Date.now(), battleId, userId, kind); throw error; } })(); this.payments.set(key, task); void task.finally(() => this.payments.delete(key)).catch(() => {}); return task; }
+  private payment(battleId: string, userId: string, kind: PaymentKind, amountMinor: number, resolveParties: () => Promise<[ManagedWallet, PublicKey]>) { if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new GameError('Invalid USDC amount'); const key = `${battleId}:${userId}:${kind}`; const active = this.payments.get(key); if (active) return active; const task = this.withPaymentSlot(async () => { const prior = this.store.db.prepare('SELECT amount_minor,signature FROM pay_transfers WHERE battle_id=? AND user_id=? AND kind=?').get(battleId, userId, kind) as { amount_minor: number; signature: string } | undefined; if (prior) { if (prior.amount_minor !== amountMinor) throw new Error('Recorded payment amount mismatch'); this.store.db.prepare("INSERT OR IGNORE INTO pay_intents(battle_id,user_id,kind,amount_minor,state,signature,updated_at) VALUES(?,?,?,?,'confirmed',?,?)").run(battleId, userId, kind, amountMinor, prior.signature, Date.now()); return prior.signature; } this.store.db.prepare('INSERT OR IGNORE INTO pay_intents(battle_id,user_id,kind,amount_minor,updated_at) VALUES(?,?,?,?,?)').run(battleId, userId, kind, amountMinor, Date.now()); const intent = this.intent(battleId, userId, kind)!; if (intent.amount_minor !== amountMinor) throw new Error('Payment intent amount mismatch'); try { const [owner, destination] = await resolveParties(); return await this.executePayment(intent, owner, destination); } catch (error) { if (error instanceof Error && error.message.includes('failed on chain')) this.store.db.prepare("UPDATE pay_intents SET state='failed',updated_at=? WHERE battle_id=? AND user_id=? AND kind=?").run(Date.now(), battleId, userId, kind); throw error; } }); this.payments.set(key, task); void task.finally(() => this.payments.delete(key)).catch(() => {}); return task; }
   async lockStake(battleId: string, userId: string, amountMinor: number) {
     this.assertTester(userId);
     if (await this.balanceMinor(userId) < amountMinor) {

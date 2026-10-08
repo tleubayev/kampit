@@ -3,6 +3,7 @@ const el = id => document.getElementById(id);
 const money = value => Number.isFinite(value) ? `$${Number(value).toFixed(2)}` : '—';
 const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 let battleId, state, stream, accountInfo, requestBusy = false, serverOffset = 0, lastServerNow = 0;
+let readyPaymentBusy = false;
 let payInfo;
 const startParam = tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('tgWebAppStartParam');
 const windowBattle = new URLSearchParams(location.search).get('battle');
@@ -34,9 +35,9 @@ async function openBattle(id, updateAddress=false) {
   stream.onerror=()=>{el('feedTime').textContent='RECONNECTING';};
 }
 async function action(name,data) {
-  if(requestBusy)return;requestBusy=true;
+  if(requestBusy)return;requestBusy=true;if(name==='ready'&&state?.battle?.mode==='USDC_TEST'){readyPaymentBusy=true;render(state);}
   try { const result=await api(`/api/battles/${battleId}/${name}`,'POST',data); if(name==='rematch') await openBattle(result.id,true); else { if(result.battle?.mode==='USDC_TEST'&&name==='ready'){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};} render(result); } }
-  catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);} finally {requestBusy=false;}
+  catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);} finally {requestBusy=false;readyPaymentBusy=false;if(state)render(state);}
 }
 window.doAction=action;
 window.claimTestUsdc=async()=>{if(requestBusy)return;requestBusy=true;try{const result=await api('/api/pay/faucet','POST');payInfo={...payInfo,balanceMinor:result.balanceMinor,faucet:{amountMinor:result.amountMinor,claimed:result.claimed,state:result.state,signature:result.signature,claimedAt:result.claimedAt},transactions:result.transactions};if(state)render(state);const message=result.claimed?'1 test USDC is now in your Kampit wallet.':'Claim is being processed.';if(tg?.showAlert)tg.showAlert(message);else alert(message);}catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);}finally{requestBusy=false;}};
@@ -68,17 +69,19 @@ function render(data) {
   let html='';
   if(b.status==='lobby') {
     const readyCount=data.players.filter(p=>p.ready).length, creator=b.isCreator;
-    const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
+    const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?`<button class="primary" onclick="doAction('ready')" ${readyPaymentBusy?'disabled':''}>${readyPaymentBusy?'CONFIRMING STAKE…':'I’M READY'}</button>`:'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
     const start=creator&&readyCount>=2?'<button class="primary" onclick="doAction(\'start\')">START NOW</button>':'';
-    html=`<h1>${paid?'Devnet pay battle':'Join the battle'}</h1><p>${paid?'Test tokens have no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins with the first ready player. Unready players are excluded. ${readyCount} ready.</p>${action}${start}${paid?payTools():''}`;
+    const pool=readyCount*(b.stakeMinor||0),fee=Math.floor(pool*.01),prize=pool-fee;
+    const terms=paid?`<div class="paymentSummary"><span>FUNDED PLAYERS <b>${data.paymentProgress?.fundedPlayers||0}/${b.maxPlayers}</b></span><span>POOL <b>${(pool/1e6).toFixed(2)} USDC</b></span><span>1% FEE <b>${(fee/1e6).toFixed(3)} USDC</b></span><span>WINNER POOL <b>${(prize/1e6).toFixed(3)} USDC</b></span></div>`:'';
+    html=`<h1>${paid?'Devnet pay battle':'Join the battle'}</h1><p>${paid?'Test tokens have no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins after the first stake confirms. Unfunded players are excluded. ${readyCount} ready.</p>${terms}${action}${start}${paid?payTools():''}`;
   }
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {
     const locked=now>=b.lock_at;
     html=`<h1>${locked?'Picks are locked': 'Where will SOL finish?'}</h1><p>${mine?.prediction?`Your pick: ${mine.prediction}`:locked?'Watch the price until the finish.':'Choose in the first 10 seconds.'} · ${stakeLabel} stake</p><div class="choiceGrid"><button class="choice long ${mine?.prediction==='LONG'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'LONG'})"><b>↑</b>LONG</button><button class="choice short ${mine?.prediction==='SHORT'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'SHORT'})"><b>↓</b>SHORT</button></div><div class="small">${locked?'Prediction window closed':`Picks lock in ${Math.max(0,Math.ceil((b.lock_at-now)/1000))}s`}</div>`;
-  } else html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${b.outcome} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${mine.prediction}`:'No pick'}. ${b.outcome==='HOUSE'?'The test house keeps the entire pool.':b.outcome==='TIE'?'All stakes refunded.':`Winners split the ${paid?'test-USDC pool after a 1% house fee':'XP pool'}.`}`} ${paid?`Settlement: ${b.settlementStatus}.`:''}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${stakeLabel}</button>`;
+  } else {const progress=data.paymentProgress,settlement=paid?(b.settlementStatus==='settled'?'Settlement complete.':`Settlement: ${progress?.confirmedSettlementPayments||0}/${progress?.expectedSettlementPayments||0} payments confirmed.${progress?.delayed?' Taking longer than expected; recovery remains active.':''}`):'';html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${b.outcome} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${mine.prediction}`:'No pick'}. ${b.outcome==='HOUSE'?'The test house keeps the entire pool.':b.outcome==='TIE'?'All stakes refunded.':`Winners split the ${paid?'test-USDC pool after a 1% house fee':'XP pool'}.`}`} ${settlement}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${stakeLabel}</button>`;}
   el('content').innerHTML=html;
-  el('playerCount').textContent=`${data.players.length} / ${b.maxPlayers} joined`;
+  el('playerCount').textContent=paid?`${data.players.length}/${b.maxPlayers} joined · ${data.paymentProgress?.fundedPlayers||0} funded`:`${data.players.length} / ${b.maxPlayers} joined`;
   el('players').innerHTML=data.players.length?data.players.map(p=>`<div class="row"><span>${safe(p.name)} ${p.isYou?'· YOU':''}</span><small class="${p.prediction==='LONG'?'green':p.prediction==='SHORT'?'red':''}">${p.prediction|| (p.ready?'READY':'JOINED')}</small></div>`).join(''):'<div class="empty">Waiting for players</div>';
   el('myStats').innerHTML=data.me?`<div><strong>${data.me.wins}</strong><small>WINS</small></div><div><strong>${data.me.losses}</strong><small>LOSSES</small></div><div><strong>${data.me.streak}</strong><small>STREAK</small></div><div><strong>${data.me.xp}</strong><small>NET XP</small></div>`:'<div class="empty">Play a round to record your stats.</div>';
   el('leaderboard').innerHTML=data.leaderboard.length?data.leaderboard.slice(0,5).map((p,i)=>`<div class="row"><span>${i+1}. ${safe(p.name)}</span><small>${p.xp} XP · ${p.wins}W</small></div>`).join(''):'<div class="empty">First result starts the leaderboard</div>';

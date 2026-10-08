@@ -59,6 +59,9 @@ button:disabled { opacity: .5; cursor: default; }
 .choice.selected { background: #203c39; }
 .choice.short.selected { background: #442a38; }
 .small { color: var(--muted); font-size: 12px; margin-top: 9px; }
+.paymentSummary { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 11px; text-align: left; }
+.paymentSummary span { padding: 8px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); font-size: 9px; letter-spacing: .08em; }
+.paymentSummary b { display: block; margin-top: 2px; color: var(--text); font-size: 12px; letter-spacing: 0; }
 .panel { margin-top: 10px; padding: 15px 16px; }
 .panelHead { margin-bottom: 10px; }
 .panel h2 { margin: 0; font-size: 11px; letter-spacing: .16em; }

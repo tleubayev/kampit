@@ -97,13 +97,24 @@ async function body(req: IncomingMessage) {
 function view(id: string, userId: string) {
   const data = engine.snapshot(id);
   const now = Date.now();
+  const paid = store.paidBattle(id);
+  let paymentProgress = null;
+  if (paid) {
+    const funded = Number((store.db.prepare("SELECT COUNT(*) AS count FROM pay_intents WHERE battle_id=? AND kind='stake' AND state='confirmed'").get(id) as { count: number }).count);
+    const settlement = store.db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN state='confirmed' THEN 1 ELSE 0 END),0) AS confirmed FROM pay_intents WHERE battle_id=? AND kind IN ('payout','refund','house')").get(id) as { total: number; confirmed: number };
+    const confirmedIds = new Set((store.db.prepare("SELECT user_id FROM pay_intents WHERE battle_id=? AND kind='stake' AND state='confirmed'").all(id) as { user_id: string }[]).map(row => row.user_id));
+    const entrants = data.players.filter(player => confirmedIds.has(player.user_id));
+    const winners = entrants.filter(player => player.prediction === data.battle.outcome);
+    const expected = data.battle.status === 'void' ? entrants.length : data.battle.outcome === 'HOUSE' ? 1 : winners.length ? winners.length + 1 : entrants.length;
+    paymentProgress = { fundedPlayers: funded, expectedSettlementPayments: expected, confirmedSettlementPayments: settlement.confirmed, delayed: paid.settlement_status === 'pending' && !!data.battle.end_at && now - data.battle.end_at > 60_000 };
+  }
   return {
-    battle: publicBattle(data.battle, userId, store.paidBattle(id)),
+    battle: publicBattle(data.battle, userId, paid),
     players: publicPlayers(data.players, data.battle, userId, now),
     leaderboard: (data.leaderboard as any[]).map(row => publicStats(row)),
     me: publicStats(store.stats(data.battle.chat_id, userId) as any),
     account: publicAccount(store.account(userId)!),
-    quote: feed.fresh(now), chart: feed.history, serverNow: now,
+    quote: feed.fresh(now), chart: feed.history, serverNow: now, paymentProgress,
   };
 }
 function broadcast(id: string) {
@@ -165,6 +176,8 @@ async function reconcilePayments() {
   if (!payMode) return;
   try {
     const next = await payMode.reconcile();
+    const delayed = Number((store.db.prepare("SELECT COUNT(*) AS count FROM paid_battles pb JOIN battles b ON b.id=pb.battle_id WHERE pb.settlement_status='pending' AND b.status IN ('finished','void') AND b.end_at IS NOT NULL AND b.end_at<?").get(Date.now() - 60_000) as { count: number }).count);
+    if (delayed) next.alerts.push(`${delayed} paid settlement(s) have exceeded 60 seconds`);
     const changed = JSON.stringify(next.alerts) !== JSON.stringify(paymentHealth?.alerts || []);
     paymentHealth = next;
     if (changed && next.alerts.length) console.error('TREASURY ALERT:', next.alerts.join('; '));
