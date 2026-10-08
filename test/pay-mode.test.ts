@@ -95,6 +95,7 @@ test('withdrawals over 5 test USDC require an admin decision', async () => {
 
 test('welcome faucet gives each tester exactly 1 test USDC once', async () => {
   const store = new Store(':memory:'); store.ensureAccount('1', 'Ali');
+  store.db.prepare('INSERT INTO pay_faucets(user_id,amount_minor,signature,created_at) VALUES(?,?,?,?)').run('1', 10_000_000, 'legacy-mint-signature', 1);
   const config = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set(['1']) };
   const wallet = Keypair.generate(), operating = Keypair.generate();
   const privy = { create: async () => ({ id: 'user-wallet', address: wallet.publicKey.toBase58() }), import: async () => { throw new Error('unexpected'); }, solana: () => ({ signTransaction: async () => { throw new Error('unexpected'); } }) };
@@ -107,6 +108,7 @@ test('welcome faucet gives each tester exactly 1 test USDC once', async () => {
   const second = await service.claimFaucet('1');
   assert.equal(first.claimed, true); assert.equal(second.claimed, true); assert.equal(first.amountMinor, 1_000_000);
   assert.equal(transfers, 1); assert.equal((store.db.prepare('SELECT COUNT(*) AS count FROM pay_faucets').get() as any).count, 1);
+  assert.equal((store.db.prepare('SELECT amount_minor FROM pay_faucets WHERE user_id=?').get('1') as any).amount_minor, DEVNET_FAUCET_AMOUNT_MINOR);
   store.close();
 });
 

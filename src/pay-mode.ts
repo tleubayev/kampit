@@ -117,14 +117,15 @@ export class DevnetUsdcService {
   async house(battleId: string, amountMinor: number) { return this.payment(battleId, 'house', 'house', amountMinor, async () => { const [escrow, operating] = await Promise.all([this.treasuryWallet(), this.operatingWallet()]); return [escrow, new PublicKey(operating.address)]; }); }
   faucetStatus(userId: string) {
     this.assertTester(userId);
-    const claim = this.store.db.prepare('SELECT amount_minor,signature,created_at FROM pay_faucets WHERE user_id=?').get(userId) as { amount_minor: number; signature: string; created_at: number } | undefined;
+    const claim = this.store.db.prepare('SELECT amount_minor,signature,created_at FROM pay_faucets WHERE user_id=? AND amount_minor=?').get(userId, DEVNET_FAUCET_AMOUNT_MINOR) as { amount_minor: number; signature: string; created_at: number } | undefined;
     const intent = this.intent(`faucet:${userId}`, userId, 'payout');
     return { amountMinor: DEVNET_FAUCET_AMOUNT_MINOR, claimed: !!claim, state: claim ? 'confirmed' : intent?.state || 'available', signature: claim?.signature || intent?.signature || null, claimedAt: claim?.created_at || null };
   }
   async claimFaucet(userId: string) {
     this.assertTester(userId);
-    const existing = this.store.db.prepare('SELECT amount_minor,signature,created_at FROM pay_faucets WHERE user_id=?').get(userId) as { amount_minor: number; signature: string; created_at: number } | undefined;
+    const existing = this.store.db.prepare('SELECT amount_minor,signature,created_at FROM pay_faucets WHERE user_id=? AND amount_minor=?').get(userId, DEVNET_FAUCET_AMOUNT_MINOR) as { amount_minor: number; signature: string; created_at: number } | undefined;
     if (existing) return { ...this.faucetStatus(userId), balanceMinor: await this.balanceMinor(userId) };
+    this.store.db.prepare('DELETE FROM pay_faucets WHERE user_id=? AND amount_minor!=?').run(userId, DEVNET_FAUCET_AMOUNT_MINOR);
     const faucetId = `faucet:${userId}`;
     const signature = await this.payment(faucetId, userId, 'payout', DEVNET_FAUCET_AMOUNT_MINOR, async () => { const [operating, wallet] = await Promise.all([this.operatingWallet(), this.wallet(userId)]); return [operating, new PublicKey(wallet.address)]; });
     this.store.db.prepare('INSERT OR IGNORE INTO pay_faucets(user_id,amount_minor,signature,created_at) VALUES(?,?,?,?)').run(userId, DEVNET_FAUCET_AMOUNT_MINOR, signature, Date.now());
