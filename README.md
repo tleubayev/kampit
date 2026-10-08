@@ -42,6 +42,7 @@ Public API and live-event responses expose `isYou` and `isCreator` flags instead
 | `DATABASE_PATH` | SQLite file path; default `./battle.sqlite` |
 | `PORT` | HTTP port; default `3000` |
 | `PAY_MODE_ENABLED` | Enables the allowlisted devnet wallet API when exactly `true` |
+| `PAY_MODE_PUBLIC` | Allows all authenticated Telegram users into Devnet pay mode when exactly `true`; otherwise `PAY_MODE_TESTERS` is enforced |
 | `SOLANA_CLUSTER` | Must remain `devnet` in this build |
 | `SOLANA_RPC_URL` | Solana devnet RPC endpoint |
 | `SOLANA_FALLBACK_RPC_URL` | Backup Solana devnet RPC used automatically if the primary RPC fails |
@@ -66,6 +67,8 @@ Allowlisted testers can withdraw Circle test USDC to any valid Solana Devnet add
 Custody roles use separate Privy wallets. The fee payer holds SOL only and signs transaction fees; escrow holds player stakes and is the only source for payouts and refunds; the operating treasury receives house-won pools. Withdrawals up to 5 test USDC execute automatically, while larger withdrawals enter an admin approval queue. The overall 20 USDC transaction and 100 USDC rolling daily limits still apply. The admin dashboard shows each role's address/balance health and provides approve/reject controls.
 
 The build hardcodes Circle's official Solana Devnet USDC mint, `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`; an environment variable cannot replace it with a lookalike token. Before enabling pay mode, fund the dedicated treasury with devnet SOL and use [Circle's faucet](https://faucet.circle.com/) to send test USDC to tester wallet addresses. Circle test tokens have no financial value.
+
+Fund the operating wallet from Circle's official faucet to supply welcome claims. Each pay-enabled Telegram account can claim exactly 1 test USDC in the Mini App. Claims are transferred on-chain from the operating wallet, recorded in `pay_faucets`, and recovered idempotently after a restart. Refill the operating wallet whenever its test-USDC balance runs low; the admin dashboard reports an alert below 1 USDC.
 
 This custodial implementation is for closed devnet testing. A mainnet release needs external key management or an embedded-wallet provider, withdrawal controls, reconciliation, abuse controls, legal review, and a security audit.
 

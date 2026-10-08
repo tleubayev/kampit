@@ -10,7 +10,8 @@ export const WITHDRAWAL_MIN_MINOR = 100_000;
 export const WITHDRAWAL_MAX_MINOR = 20_000_000;
 export const WITHDRAWAL_DAILY_LIMIT_MINOR = 100_000_000;
 export const WITHDRAWAL_APPROVAL_THRESHOLD_MINOR = 5_000_000;
-export type PayConfig = { enabled: boolean; cluster: 'devnet'; rpcUrl: string; fallbackRpcUrl: string; treasurySecret: string; encryptionKey: string; privyAppId: string; privyAppSecret: string; privyTreasuryWalletId: string; allowedUsers: Set<string> };
+export const DEVNET_FAUCET_AMOUNT_MINOR = 1_000_000;
+export type PayConfig = { enabled: boolean; publicAccess: boolean; cluster: 'devnet'; rpcUrl: string; fallbackRpcUrl: string; treasurySecret: string; encryptionKey: string; privyAppId: string; privyAppSecret: string; privyTreasuryWalletId: string; allowedUsers: Set<string> };
 type ManagedWallet = { id: string; address: string };
 type PaymentKind = 'stake' | 'payout' | 'refund' | 'withdrawal' | 'house';
 type PaymentIntent = { battle_id: string; user_id: string; kind: PaymentKind; amount_minor: number; state: 'pending' | 'signed' | 'confirmed' | 'failed'; signature: string | null; raw_transaction: string | null; blockhash: string | null; last_valid_block_height: number | null; attempt: number };
@@ -19,11 +20,11 @@ type PrivyWalletClient = { create(input: Record<string, unknown>): Promise<Manag
 export function payConfigFromEnv(env = process.env): PayConfig {
   const cluster = env.SOLANA_CLUSTER || 'devnet';
   if (cluster !== 'devnet') throw new Error('Pay mode is locked to Solana devnet in this build');
-  return { enabled: env.PAY_MODE_ENABLED === 'true', cluster: 'devnet', rpcUrl: env.SOLANA_RPC_URL || 'https://api.devnet.solana.com', fallbackRpcUrl: env.SOLANA_FALLBACK_RPC_URL || 'https://api.devnet.solana.com', treasurySecret: env.SOLANA_TREASURY_SECRET || '', encryptionKey: env.WALLET_ENCRYPTION_KEY || '', privyAppId: env.PRIVY_APP_ID || '', privyAppSecret: env.PRIVY_APP_SECRET || '', privyTreasuryWalletId: env.PRIVY_TREASURY_WALLET_ID || '', allowedUsers: new Set((env.PAY_MODE_TESTERS || '').split(',').map(value => value.trim()).filter(Boolean)) };
+  return { enabled: env.PAY_MODE_ENABLED === 'true', publicAccess: env.PAY_MODE_PUBLIC === 'true', cluster: 'devnet', rpcUrl: env.SOLANA_RPC_URL || 'https://api.devnet.solana.com', fallbackRpcUrl: env.SOLANA_FALLBACK_RPC_URL || 'https://api.devnet.solana.com', treasurySecret: env.SOLANA_TREASURY_SECRET || '', encryptionKey: env.WALLET_ENCRYPTION_KEY || '', privyAppId: env.PRIVY_APP_ID || '', privyAppSecret: env.PRIVY_APP_SECRET || '', privyTreasuryWalletId: env.PRIVY_TREASURY_WALLET_ID || '', allowedUsers: new Set((env.PAY_MODE_TESTERS || '').split(',').map(value => value.trim()).filter(Boolean)) };
 }
 export function validatePayConfig(config: PayConfig) {
   if (!config.enabled) return;
-  if (!config.privyAppId || !config.privyAppSecret || !config.allowedUsers.size) throw new Error('Pay mode requires PRIVY_APP_ID, PRIVY_APP_SECRET, and PAY_MODE_TESTERS');
+  if (!config.privyAppId || !config.privyAppSecret || (!config.publicAccess && !config.allowedUsers.size)) throw new Error('Pay mode requires PRIVY_APP_ID, PRIVY_APP_SECRET, and either PAY_MODE_PUBLIC=true or PAY_MODE_TESTERS');
   if (!config.privyTreasuryWalletId && !config.treasurySecret) throw new Error('Set PRIVY_TREASURY_WALLET_ID or temporarily keep SOLANA_TREASURY_SECRET for one-time migration');
   if (config.treasurySecret && config.encryptionKey.length < 32) throw new Error('WALLET_ENCRYPTION_KEY (32+ chars) is required while legacy wallets are being migrated');
   if (config.treasurySecret) decodeKeypair(config.treasurySecret);
@@ -40,7 +41,7 @@ export class DevnetUsdcService {
   private async rpc<T>(operation: (connection: Connection) => Promise<T>) { try { return await operation(this.connection); } catch (primaryError) { if (this.config.fallbackRpcUrl === this.config.rpcUrl) throw primaryError; return operation(this.fallbackConnection); } }
   private payments = new Map<string, Promise<string>>();
   private withdrawals = new Map<string, Promise<{ status: string; signature?: string }>>();
-  assertTester(userId: string) { if (!this.config.enabled || !this.config.allowedUsers.has(userId)) throw new GameError('Test pay mode is not enabled for this account', 403); }
+  assertTester(userId: string) { if (!this.config.enabled || (!this.config.publicAccess && !this.config.allowedUsers.has(userId))) throw new GameError('Test pay mode is not enabled for this account', 403); }
   async wallet(userId: string): Promise<ManagedWallet> {
     this.assertTester(userId);
     const found = this.store.db.prepare('SELECT address,encrypted_secret,privy_wallet_id FROM pay_wallets WHERE user_id=?').get(userId) as { address: string; encrypted_secret: string; privy_wallet_id: string | null } | undefined;
@@ -107,6 +108,21 @@ export class DevnetUsdcService {
   async lockStake(battleId: string, userId: string, amountMinor: number) { this.assertTester(userId); return this.payment(battleId, userId, 'stake', amountMinor, async () => { const treasury = await this.treasuryWallet(); return [await this.wallet(userId), new PublicKey(treasury.address)]; }); }
   async pay(userId: string, battleId: string, kind: 'payout' | 'refund', amountMinor: number) { return this.payment(battleId, userId, kind, amountMinor, async () => { const [treasury, wallet] = await Promise.all([this.treasuryWallet(), this.wallet(userId)]); return [treasury, new PublicKey(wallet.address)]; }); }
   async house(battleId: string, amountMinor: number) { return this.payment(battleId, 'house', 'house', amountMinor, async () => { const [escrow, operating] = await Promise.all([this.treasuryWallet(), this.operatingWallet()]); return [escrow, new PublicKey(operating.address)]; }); }
+  faucetStatus(userId: string) {
+    this.assertTester(userId);
+    const claim = this.store.db.prepare('SELECT amount_minor,signature,created_at FROM pay_faucets WHERE user_id=?').get(userId) as { amount_minor: number; signature: string; created_at: number } | undefined;
+    const intent = this.intent(`faucet:${userId}`, userId, 'payout');
+    return { amountMinor: DEVNET_FAUCET_AMOUNT_MINOR, claimed: !!claim, state: claim ? 'confirmed' : intent?.state || 'available', signature: claim?.signature || intent?.signature || null, claimedAt: claim?.created_at || null };
+  }
+  async claimFaucet(userId: string) {
+    this.assertTester(userId);
+    const existing = this.store.db.prepare('SELECT amount_minor,signature,created_at FROM pay_faucets WHERE user_id=?').get(userId) as { amount_minor: number; signature: string; created_at: number } | undefined;
+    if (existing) return { ...this.faucetStatus(userId), balanceMinor: await this.balanceMinor(userId) };
+    const faucetId = `faucet:${userId}`;
+    const signature = await this.payment(faucetId, userId, 'payout', DEVNET_FAUCET_AMOUNT_MINOR, async () => { const [operating, wallet] = await Promise.all([this.operatingWallet(), this.wallet(userId)]); return [operating, new PublicKey(wallet.address)]; });
+    this.store.db.prepare('INSERT OR IGNORE INTO pay_faucets(user_id,amount_minor,signature,created_at) VALUES(?,?,?,?)').run(userId, DEVNET_FAUCET_AMOUNT_MINOR, signature, Date.now());
+    return { ...this.faucetStatus(userId), balanceMinor: await this.balanceMinor(userId) };
+  }
   async withdraw(userId: string, requestId: string, recipientValue: string, amountMinor: number) { const active = this.withdrawals.get(userId); if (active) await active.catch(() => {}); const task = this.withdrawOnce(userId, requestId, recipientValue, amountMinor); this.withdrawals.set(userId, task); void task.finally(() => { if (this.withdrawals.get(userId) === task) this.withdrawals.delete(userId); }).catch(() => {}); return task; }
   private async withdrawOnce(userId: string, requestId: string, recipientValue: string, amountMinor: number) {
     this.assertTester(userId);
@@ -144,6 +160,7 @@ export class DevnetUsdcService {
         if (row.kind === 'withdrawal') { const withdrawal = this.store.db.prepare("SELECT recipient FROM pay_withdrawals WHERE id=? AND approval_status IN ('auto','approved')").get(row.battle_id) as { recipient: string } | undefined; if (!withdrawal) continue; await this.payment(row.battle_id, row.user_id, row.kind, row.amount_minor, async () => [await this.wallet(row.user_id), new PublicKey(withdrawal.recipient)]); }
         else if (row.kind === 'stake') { await this.lockStake(row.battle_id, row.user_id, row.amount_minor); }
         else if (row.kind === 'house') { await this.house(row.battle_id, row.amount_minor); }
+        else if (row.kind === 'payout' && row.battle_id === `faucet:${row.user_id}`) { const [operating, wallet] = await Promise.all([this.operatingWallet(), this.wallet(row.user_id)]); const signature = await this.payment(row.battle_id, row.user_id, row.kind, row.amount_minor, async () => [operating, new PublicKey(wallet.address)]); this.store.db.prepare('INSERT OR IGNORE INTO pay_faucets(user_id,amount_minor,signature,created_at) VALUES(?,?,?,?)').run(row.user_id, row.amount_minor, signature, Date.now()); }
         else await this.pay(row.user_id, row.battle_id, row.kind, row.amount_minor);
         recovered++;
       } catch (error) { failed++; console.error('Payment reconciliation:', row.battle_id, row.kind, error); }
@@ -154,6 +171,6 @@ export class DevnetUsdcService {
     if (feePayerSolLamports < 10_000_000 && Date.now() - lastAirdrop > 3600000) { this.store.db.prepare("INSERT OR REPLACE INTO app_meta(key,value) VALUES('fee_payer_airdrop_attempt_at',?)").run(String(Date.now())); try { const signature = await this.fallbackConnection.requestAirdrop(feePayerAddress, 100_000_000); await this.fallbackConnection.confirmTransaction(signature, 'confirmed'); feePayerSolLamports = await this.fallbackConnection.getBalance(feePayerAddress, 'confirmed'); } catch (error) { console.error('Fee payer Devnet funding:', error); } }
     let escrowUsdcMinor = 0, operatingUsdcMinor = 0; try { escrowUsdcMinor = Number((await this.rpc(connection => getAccount(connection, escrowToken))).amount); } catch {} try { operatingUsdcMinor = Number((await this.rpc(connection => getAccount(connection, operatingToken))).amount); } catch {}
     const obligationsMinor = Number((this.store.db.prepare("SELECT COALESCE(SUM(amount_minor),0) AS total FROM pay_intents WHERE kind IN ('payout','refund') AND state IN ('pending','signed')").get() as { total: number }).total);
-    return { checked: rows.length, recovered, failed, pending: rows.length - recovered, wallets: { feePayer: { address: feePayer.address, solLamports: feePayerSolLamports }, escrow: { address: escrow.address, usdcMinor: escrowUsdcMinor, obligationsMinor }, operating: { address: operating.address, usdcMinor: operatingUsdcMinor } }, approvalQueue: this.pendingWithdrawals().length, alerts: [...(feePayerSolLamports < 10_000_000 ? ['Fee payer SOL is below 0.01 SOL'] : []), ...(escrowUsdcMinor < obligationsMinor ? ['Escrow USDC is below pending payout obligations'] : []), ...(this.pendingWithdrawals().length ? [`${this.pendingWithdrawals().length} withdrawal(s) await approval`] : []), ...(failed ? [`${failed} payment reconciliation attempt(s) need attention`] : [])] };
+    return { checked: rows.length, recovered, failed, pending: rows.length - recovered, wallets: { feePayer: { address: feePayer.address, solLamports: feePayerSolLamports }, escrow: { address: escrow.address, usdcMinor: escrowUsdcMinor, obligationsMinor }, operating: { address: operating.address, usdcMinor: operatingUsdcMinor } }, approvalQueue: this.pendingWithdrawals().length, alerts: [...(feePayerSolLamports < 10_000_000 ? ['Fee payer SOL is below 0.01 SOL'] : []), ...(escrowUsdcMinor < obligationsMinor ? ['Escrow USDC is below pending payout obligations'] : []), ...(operatingUsdcMinor < DEVNET_FAUCET_AMOUNT_MINOR ? ['Operating wallet has less than 1 test USDC for new-player claims'] : []), ...(this.pendingWithdrawals().length ? [`${this.pendingWithdrawals().length} withdrawal(s) await approval`] : []), ...(failed ? [`${failed} payment reconciliation attempt(s) need attention`] : [])] };
   }
 }

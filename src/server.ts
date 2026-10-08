@@ -33,7 +33,7 @@ store.grantDaily();
 store.db.exec('CREATE TABLE IF NOT EXISTS processed_updates (update_id INTEGER PRIMARY KEY);');
 const engine = new Engine(store);
 const feed = new CoinbasePriceFeed();
-const bot = new Bot(token, username, shortName, engine, payConfig.allowedUsers);
+const bot = new Bot(token, username, shortName, engine, payConfig.allowedUsers, payConfig.enabled && payConfig.publicAccess);
 const sessions = new Map<string, { identity: TelegramIdentity; expires: number; battles: Set<string> }>();
 const streams = new Map<string, Set<{ res: ServerResponse; userId: string; sessionKey: string }>>();
 const pendingUpdates = new Map<number, Promise<void>>();
@@ -241,7 +241,7 @@ const server = createServer(async (req, res) => {
         if (!payMode) throw new GameError('Test pay mode is disabled', 404);
         payMode.assertTester(actorId);
         const wallet = await payMode.wallet(actorId);
-        json(res, 200, { enabled: true, cluster: 'devnet', currency: 'Circle test USDC', mintAddress: payMode.mint.toBase58(), walletAddress: wallet.address, depositAddress: await payMode.depositAddress(actorId), balanceMinor: await payMode.balanceMinor(actorId), limits: { minWithdrawalMinor: 100_000, maxWithdrawalMinor: 20_000_000, dailyWithdrawalMinor: 100_000_000 } }); return;
+        json(res, 200, { enabled: true, cluster: 'devnet', currency: 'Circle test USDC', mintAddress: payMode.mint.toBase58(), walletAddress: wallet.address, depositAddress: await payMode.depositAddress(actorId), balanceMinor: await payMode.balanceMinor(actorId), faucet: payMode.faucetStatus(actorId), limits: { minWithdrawalMinor: 100_000, maxWithdrawalMinor: 20_000_000, dailyWithdrawalMinor: 100_000_000 } }); return;
       }
       if (req.method === 'GET' && path === '/api/pay/history') {
         if (!payMode) throw new GameError('Test pay mode is disabled', 404);
@@ -253,6 +253,12 @@ const server = createServer(async (req, res) => {
         const data = await body(req);
         const result = await payMode.withdraw(actorId, String(data.requestId || ''), String(data.recipient || ''), Number(data.amountMinor));
         json(res, 200, { ...result, balanceMinor: await payMode.balanceMinor(actorId), transactions: payMode.history(actorId) }); return;
+      }
+      if (req.method === 'POST' && path === '/api/pay/faucet') {
+        if (!payMode) throw new GameError('Test pay mode is disabled', 404);
+        enforceLimit(actionLimiter, actorId, 2, 60000);
+        const result = await payMode.claimFaucet(actorId);
+        json(res, 200, { ...result, transactions: payMode.history(actorId) }); return;
       }
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);

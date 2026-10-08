@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Keypair, Transaction } from '@solana/web3.js';
 import { Store } from '../src/store.ts';
 import { Engine } from '../src/engine.ts';
-import { CIRCLE_SOLANA_DEVNET_USDC_MINT, decryptWallet, encryptWallet, payConfigFromEnv, validatePayConfig } from '../src/pay-mode.ts';
+import { CIRCLE_SOLANA_DEVNET_USDC_MINT, DEVNET_FAUCET_AMOUNT_MINOR, decryptWallet, encryptWallet, payConfigFromEnv, validatePayConfig } from '../src/pay-mode.ts';
 
 test('wallet secrets are authenticated and decrypt only with the configured key', () => {
   const wallet = Keypair.generate(), key = 'a'.repeat(32), encrypted = encryptWallet(wallet.secretKey, key);
@@ -14,6 +14,7 @@ test('wallet secrets are authenticated and decrypt only with the configured key'
 
 test('pay configuration is disabled by default and rejects non-devnet clusters', () => {
   assert.equal(payConfigFromEnv({} as NodeJS.ProcessEnv).enabled, false);
+  assert.equal(payConfigFromEnv({} as NodeJS.ProcessEnv).publicAccess, false);
   assert.throws(() => payConfigFromEnv({ SOLANA_CLUSTER: 'mainnet-beta' } as NodeJS.ProcessEnv), /locked to Solana devnet/);
   assert.equal(CIRCLE_SOLANA_DEVNET_USDC_MINT, '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
   assert.equal('usdcMint' in payConfigFromEnv({ TEST_USDC_MINT: Keypair.generate().publicKey.toBase58() } as NodeJS.ProcessEnv), false);
@@ -21,9 +22,10 @@ test('pay configuration is disabled by default and rejects non-devnet clusters',
 
 test('enabled pay mode requires secrets and an explicit tester allowlist', () => {
   const treasury = Keypair.generate();
-  const base = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'https://api.devnet.solana.com', fallbackRpcUrl: 'https://api.devnet.solana.com', treasurySecret: Buffer.from(treasury.secretKey).toString('base64'), encryptionKey: 'x'.repeat(32), privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: '', allowedUsers: new Set(['1']) };
+  const base = { enabled: true, publicAccess: false, cluster: 'devnet' as const, rpcUrl: 'https://api.devnet.solana.com', fallbackRpcUrl: 'https://api.devnet.solana.com', treasurySecret: Buffer.from(treasury.secretKey).toString('base64'), encryptionKey: 'x'.repeat(32), privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: '', allowedUsers: new Set(['1']) };
   assert.doesNotThrow(() => validatePayConfig(base));
   assert.throws(() => validatePayConfig({ ...base, allowedUsers: new Set() }), /PAY_MODE_TESTERS/);
+  assert.doesNotThrow(() => validatePayConfig({ ...base, publicAccess: true, allowedUsers: new Set() }));
 });
 
 test('Privy wallet migration removes the locally stored private key', async () => {
@@ -89,6 +91,23 @@ test('withdrawals over 5 test USDC require an admin decision', async () => {
   assert.deepEqual(await service.withdraw('1', id, recipient, 6_000_000), { status: 'approval_required' });
   assert.equal(service.pendingWithdrawals().length, 1); assert.equal(service.history('1')[0].state, 'pending');
   assert.deepEqual(await service.decideWithdrawal(id, false), { status: 'rejected' }); assert.equal(service.pendingWithdrawals().length, 0); store.close();
+});
+
+test('welcome faucet gives each tester exactly 1 test USDC once', async () => {
+  const store = new Store(':memory:'); store.ensureAccount('1', 'Ali');
+  const config = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set(['1']) };
+  const wallet = Keypair.generate(), operating = Keypair.generate();
+  const privy = { create: async () => ({ id: 'user-wallet', address: wallet.publicKey.toBase58() }), import: async () => { throw new Error('unexpected'); }, solana: () => ({ signTransaction: async () => { throw new Error('unexpected'); } }) };
+  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, config, privy);
+  let transfers = 0;
+  (service as any).operatingWallet = async () => ({ id: 'operating-wallet', address: operating.publicKey.toBase58() });
+  (service as any).payment = async (_battleId: string, _userId: string, _kind: string, amount: number, parties: () => Promise<unknown>) => { transfers++; assert.equal(amount, DEVNET_FAUCET_AMOUNT_MINOR); await parties(); return 'faucet-signature'; };
+  (service as any).balanceMinor = async () => DEVNET_FAUCET_AMOUNT_MINOR;
+  const first = await service.claimFaucet('1');
+  const second = await service.claimFaucet('1');
+  assert.equal(first.claimed, true); assert.equal(second.claimed, true); assert.equal(first.amountMinor, 1_000_000);
+  assert.equal(transfers, 1); assert.equal((store.db.prepare('SELECT COUNT(*) AS count FROM pay_faucets').get() as any).count, 1);
+  store.close();
 });
 
 test('paid rounds use test-USDC readiness without changing XP balances', () => {

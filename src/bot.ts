@@ -9,9 +9,10 @@ type Update = { update_id: number; message?: TgMessage; callback_query?: { id: s
 export class Bot {
   private token: string; private username: string; private shortName: string; private engine: Engine;
   private payTesters: Set<string>;
+  private publicPayMode: boolean;
   private battleLimiter = new SlidingWindowRateLimiter();
   private warningLimiter = new SlidingWindowRateLimiter();
-  constructor(token: string, username: string, shortName: string, engine: Engine, payTesters = new Set<string>()) { this.token=token; this.username=username; this.shortName=shortName; this.engine=engine; this.payTesters=payTesters; }
+  constructor(token: string, username: string, shortName: string, engine: Engine, payTesters = new Set<string>(), publicPayMode = false) { this.token=token; this.username=username; this.shortName=shortName; this.engine=engine; this.payTesters=payTesters; this.publicPayMode=publicPayMode; }
   link(id: string) { return `https://t.me/${this.username}/${this.shortName}?startapp=${id}`; }
   async call(method: string, body: Record<string, unknown>) {
     const response = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
@@ -36,6 +37,7 @@ export class Bot {
       { command: 'stats', description: 'Your group stats' },
       { command: 'referral', description: 'Get your invite link' },
       { command: 'cancel', description: 'Cancel your open lobby' },
+      ...(this.publicPayMode ? [{ command: 'paybattle', description: 'Start a Devnet USDC battle' }] : []),
       { command: 'help', description: 'How to play' }
     ] });
   }
@@ -44,7 +46,7 @@ export class Bot {
     const stakeLabel = paid ? `${(paid.stake_minor / 1_000_000).toFixed(2)} TEST USDC` : `${battle.stake} XP`;
     const sent = await this.call('sendMessage', {
       chat_id: battle.chat_id,
-      text: `⚔️ SOL QUICK BATTLE · ${stakeLabel} STAKE${paid ? '\n🧪 PRIVATE DEVNET TEST · TOKENS HAVE NO VALUE' : ''}\n\nReady up to lock ${stakeLabel}. The lobby runs for 30 seconds after the first player readies up; unready players are excluded. Predict SOL/USD over 60 seconds. 2–100 players.`,
+      text: `⚔️ SOL QUICK BATTLE · ${stakeLabel} STAKE${paid ? '\n🧪 SOLANA DEVNET · TOKENS HAVE NO VALUE' : ''}\n\nReady up to lock ${stakeLabel}. The lobby runs for 30 seconds after the first player readies up; unready players are excluded. Predict SOL/USD over 60 seconds. 2–100 players.`,
       reply_markup: { inline_keyboard: [[{ text: '⚔️ JOIN BATTLE', url: this.link(battle.id) }]] }
     });
     this.engine.store.db.prepare('UPDATE battles SET message_id=? WHERE id=?').run(sent.message_id, battle.id);
@@ -87,7 +89,7 @@ export class Bot {
         await this.call('sendMessage', { chat_id: chatId, text: 'Stake must be a whole number of at least 10 XP. Example: /battle 50' });
       } else if (message.from) await this.startBattle(message, message.from, Number(amount));
     } else if (command === '/paybattle' && message.from) {
-      if (!this.payTesters.has(String(message.from.id))) { await this.call('sendMessage', { chat_id: chatId, text: 'Private devnet test only.' }); return; }
+      if (!this.publicPayMode && !this.payTesters.has(String(message.from.id))) { await this.call('sendMessage', { chat_id: chatId, text: 'Private devnet test only.' }); return; }
       if (!['group', 'supergroup'].includes(message.chat.type)) { await this.call('sendMessage', { chat_id: chatId, text: 'Use /paybattle in a test group.' }); return; }
       const amount = message.text.trim().split(/\s+/)[1] || '0.10';
       if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) < 0.1) { await this.call('sendMessage', { chat_id: chatId, text: 'Use /paybattle 0.10 or a larger test-USDC amount.' }); return; }

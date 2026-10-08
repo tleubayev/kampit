@@ -89,6 +89,7 @@ footer { text-align: center; color: #6c7a94; font-size: 11px; margin-top: 20px; 
 .withdrawGrid input { min-width: 0; height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: #0b1222; color: var(--text); font: inherit; }
 .withdrawGrid button { grid-column: 1 / -1; min-height: 40px; }
 .txList { margin-top: 10px; border-top: 1px solid var(--line); }
+.faucetClaim { width: 100%; min-height: 42px; margin: 10px 0 7px; }
 .txRow { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
 .txRow a { text-decoration: none; font-weight: 800; }
 .home .hero, .home .clock, .home .playersPanel, .home .statsPanel, .home .leaderboardPanel { display: none; }
