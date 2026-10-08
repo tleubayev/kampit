@@ -39,6 +39,7 @@ const sessions = new Map<string, { identity: TelegramIdentity; expires: number; 
 const streams = new Map<string, Set<{ res: ServerResponse; userId: string; sessionKey: string }>>();
 const pendingUpdates = new Map<number, Promise<void>>();
 const delivering = new Set<string>();
+const settling = new Set<string>();
 const apiLimiter = new SlidingWindowRateLimiter();
 const actionLimiter = new SlidingWindowRateLimiter();
 const sessionLimiter = new SlidingWindowRateLimiter();
@@ -122,18 +123,24 @@ async function deliverResult(id: string) {
 }
 engine.on('resolved', battle => void deliverResult(battle.id));
 async function settlePaidBattle(id: string) {
-  if (!payMode) return;
-  const paid = store.paidBattle(id); if (!paid || paid.settlement_status === 'settled') return;
-  const battle = engine.require(id); if (!['finished', 'void'].includes(battle.status)) return;
-  const confirmed = store.db.prepare("SELECT user_id FROM pay_transfers WHERE battle_id=? AND kind='stake'").all(id) as { user_id: string }[];
-  const confirmedIds = new Set(confirmed.map(row => row.user_id));
-  const entrants = store.players(id).filter(player => confirmedIds.has(player.user_id));
-  const winners = entrants.filter(player => player.prediction === battle.outcome);
-  const distribution = paidDistribution(entrants.map(player => player.user_id), winners.map(player => player.user_id), paid.stake_minor, battle.outcome === 'HOUSE', battle.status === 'void');
-  if (distribution.houseMinor) await payMode.house(id, distribution.houseMinor);
-  for (const [userId, amountMinor] of distribution.payouts) await payMode.pay(userId, id, 'payout', amountMinor);
-  for (const [userId, amountMinor] of distribution.refunds) await payMode.pay(userId, id, 'refund', amountMinor);
-  store.db.prepare("UPDATE paid_battles SET settlement_status='settled' WHERE battle_id=?").run(id); broadcast(id);
+  if (!payMode || settling.has(id)) return;
+  settling.add(id);
+  try {
+    const paid = store.paidBattle(id); if (!paid || paid.settlement_status === 'settled') return;
+    const battle = engine.require(id); if (!['finished', 'void'].includes(battle.status)) return;
+    const confirmedIntents = store.db.prepare("SELECT user_id,amount_minor,signature,updated_at FROM pay_intents WHERE battle_id=? AND kind='stake' AND state='confirmed' AND signature IS NOT NULL").all(id) as { user_id: string; amount_minor: number; signature: string; updated_at: number }[];
+    const repair = store.db.prepare("INSERT OR IGNORE INTO pay_transfers(battle_id,user_id,kind,amount_minor,signature,created_at) VALUES(?,?,'stake',?,?,?)");
+    for (const intent of confirmedIntents) repair.run(id, intent.user_id, intent.amount_minor, intent.signature, intent.updated_at);
+    const confirmed = store.db.prepare("SELECT user_id FROM pay_transfers WHERE battle_id=? AND kind='stake'").all(id) as { user_id: string }[];
+    const confirmedIds = new Set(confirmed.map(row => row.user_id));
+    const entrants = store.players(id).filter(player => confirmedIds.has(player.user_id));
+    const winners = entrants.filter(player => player.prediction === battle.outcome);
+    const distribution = paidDistribution(entrants.map(player => player.user_id), winners.map(player => player.user_id), paid.stake_minor, battle.outcome === 'HOUSE', battle.status === 'void');
+    if (distribution.houseMinor) await payMode.house(id, distribution.houseMinor);
+    for (const [userId, amountMinor] of distribution.payouts) await payMode.pay(userId, id, 'payout', amountMinor);
+    for (const [userId, amountMinor] of distribution.refunds) await payMode.pay(userId, id, 'refund', amountMinor);
+    store.db.prepare("UPDATE paid_battles SET settlement_status='settled' WHERE battle_id=?").run(id); broadcast(id);
+  } finally { settling.delete(id); }
 }
 engine.on('resolved', battle => void settlePaidBattle(battle.id).catch(error => console.error('Test-USDC settlement:', error)));
 feed.start();
