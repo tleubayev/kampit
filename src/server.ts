@@ -39,6 +39,7 @@ const delivering = new Set<string>();
 const apiLimiter = new SlidingWindowRateLimiter();
 const actionLimiter = new SlidingWindowRateLimiter();
 const sessionLimiter = new SlidingWindowRateLimiter();
+let paymentHealth: Awaited<ReturnType<DevnetUsdcService['reconcile']>> | null = null;
 
 function enforceLimit(limiter: SlidingWindowRateLimiter, key: string, limit: number, windowMs = 60_000) {
   const result = limiter.take(key, limit, windowMs);
@@ -142,6 +143,16 @@ setInterval(() => {
   const rows = store.db.prepare("SELECT pb.battle_id AS id FROM paid_battles pb JOIN battles b ON b.id=pb.battle_id WHERE pb.settlement_status='pending' AND b.status IN ('finished','void')").all() as { id: string }[];
   for (const row of rows) void settlePaidBattle(row.id).catch(error => console.error('Test-USDC settlement retry:', error));
 }, 10000);
+async function reconcilePayments() {
+  if (!payMode) return;
+  try {
+    const next = await payMode.reconcile();
+    const changed = JSON.stringify(next.alerts) !== JSON.stringify(paymentHealth?.alerts || []);
+    paymentHealth = next;
+    if (changed && next.alerts.length) console.error('TREASURY ALERT:', next.alerts.join('; '));
+  } catch (error) { console.error('Payment reconciliation worker:', error); }
+}
+if (payMode) { void reconcilePayments(); setInterval(() => void reconcilePayments(), 30000); }
 
 const publicDir = resolve('public');
 const server = createServer(async (req, res) => {
@@ -156,7 +167,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === 'GET' && path === '/admin/metrics') {
       if (!requireAdmin(req, res)) return;
-      json(res, 200, { ...store.dashboardMetrics(), health: { priceFresh: !!feed.fresh(), connectedPlayers: [...streams.values()].reduce((sum, clients) => sum + clients.size, 0) }, generatedAt: Date.now() }); return;
+      json(res, 200, { ...store.dashboardMetrics(), health: { priceFresh: !!feed.fresh(), connectedPlayers: [...streams.values()].reduce((sum, clients) => sum + clients.size, 0), payments: paymentHealth }, generatedAt: Date.now() }); return;
     }
     if (req.method === 'POST' && path === '/telegram/webhook') {
       if (req.headers['x-telegram-bot-api-secret-token'] !== webhookSecret) throw new GameError('Forbidden', 403);
@@ -203,7 +214,18 @@ const server = createServer(async (req, res) => {
         if (!payMode) throw new GameError('Test pay mode is disabled', 404);
         payMode.assertTester(actorId);
         const wallet = await payMode.wallet(actorId);
-        json(res, 200, { enabled: true, cluster: 'devnet', currency: 'Circle test USDC', mintAddress: payMode.mint.toBase58(), walletAddress: wallet.address, depositAddress: await payMode.depositAddress(actorId), balanceMinor: await payMode.balanceMinor(actorId) }); return;
+        json(res, 200, { enabled: true, cluster: 'devnet', currency: 'Circle test USDC', mintAddress: payMode.mint.toBase58(), walletAddress: wallet.address, depositAddress: await payMode.depositAddress(actorId), balanceMinor: await payMode.balanceMinor(actorId), limits: { minWithdrawalMinor: 100_000, maxWithdrawalMinor: 20_000_000, dailyWithdrawalMinor: 100_000_000 } }); return;
+      }
+      if (req.method === 'GET' && path === '/api/pay/history') {
+        if (!payMode) throw new GameError('Test pay mode is disabled', 404);
+        json(res, 200, { transactions: payMode.history(actorId) }); return;
+      }
+      if (req.method === 'POST' && path === '/api/pay/withdrawals') {
+        if (!payMode) throw new GameError('Test pay mode is disabled', 404);
+        enforceLimit(actionLimiter, actorId, 3, 60000);
+        const data = await body(req);
+        const signature = await payMode.withdraw(actorId, String(data.requestId || ''), String(data.recipient || ''), Number(data.amountMinor));
+        json(res, 200, { signature, balanceMinor: await payMode.balanceMinor(actorId), transactions: payMode.history(actorId) }); return;
       }
       const parts = path.split('/').filter(Boolean);
       if (parts[1] !== 'battles' || !parts[2]) throw new GameError('Not found', 404);

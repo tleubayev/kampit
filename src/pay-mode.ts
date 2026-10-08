@@ -6,10 +6,13 @@ import type { Store } from './store.ts';
 import { GameError } from './engine.ts';
 
 export const CIRCLE_SOLANA_DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+export const WITHDRAWAL_MIN_MINOR = 100_000;
+export const WITHDRAWAL_MAX_MINOR = 20_000_000;
+export const WITHDRAWAL_DAILY_LIMIT_MINOR = 100_000_000;
 export type PayConfig = { enabled: boolean; cluster: 'devnet'; rpcUrl: string; fallbackRpcUrl: string; treasurySecret: string; encryptionKey: string; privyAppId: string; privyAppSecret: string; privyTreasuryWalletId: string; allowedUsers: Set<string> };
 type ManagedWallet = { id: string; address: string };
-type PaymentKind = 'stake' | 'payout' | 'refund';
-type PaymentIntent = { battle_id: string; user_id: string; kind: PaymentKind; amount_minor: number; state: 'pending' | 'signed' | 'confirmed'; signature: string | null; raw_transaction: string | null; blockhash: string | null; last_valid_block_height: number | null; attempt: number };
+type PaymentKind = 'stake' | 'payout' | 'refund' | 'withdrawal';
+type PaymentIntent = { battle_id: string; user_id: string; kind: PaymentKind; amount_minor: number; state: 'pending' | 'signed' | 'confirmed' | 'failed'; signature: string | null; raw_transaction: string | null; blockhash: string | null; last_valid_block_height: number | null; attempt: number };
 type PrivyWalletClient = { create(input: Record<string, unknown>): Promise<ManagedWallet>; import(input: Record<string, unknown>): Promise<ManagedWallet>; solana(): { signTransaction(walletId: string, input: { transaction: Uint8Array; idempotency_key?: string }): Promise<{ signed_transaction: string }> } };
 
 export function payConfigFromEnv(env = process.env): PayConfig {
@@ -35,6 +38,7 @@ export class DevnetUsdcService {
   constructor(store: Store, config: PayConfig, privy?: PrivyWalletClient) { this.store = store; this.config = config; validatePayConfig(config); this.connection = new Connection(config.rpcUrl, 'confirmed'); this.fallbackConnection = new Connection(config.fallbackRpcUrl, 'confirmed'); this.mint = new PublicKey(CIRCLE_SOLANA_DEVNET_USDC_MINT); this.privy = privy || (new PrivyClient({ appId: config.privyAppId, appSecret: config.privyAppSecret }).wallets() as unknown as PrivyWalletClient); }
   private async rpc<T>(operation: (connection: Connection) => Promise<T>) { try { return await operation(this.connection); } catch (primaryError) { if (this.config.fallbackRpcUrl === this.config.rpcUrl) throw primaryError; return operation(this.fallbackConnection); } }
   private payments = new Map<string, Promise<string>>();
+  private withdrawals = new Map<string, Promise<string>>();
   assertTester(userId: string) { if (!this.config.enabled || !this.config.allowedUsers.has(userId)) throw new GameError('Test pay mode is not enabled for this account', 403); }
   async wallet(userId: string): Promise<ManagedWallet> {
     this.assertTester(userId);
@@ -63,7 +67,7 @@ export class DevnetUsdcService {
   async balanceMinor(userId: string) { const address = new PublicKey(await this.depositAddress(userId)); try { return Number((await this.rpc(connection => getAccount(connection, address))).amount); } catch { return 0; } }
   private async sign(transaction: Transaction, walletIds: string[]) { let bytes = transaction.serialize({ requireAllSignatures: false, verifySignatures: false }); for (const walletId of walletIds) { const signed = await this.privy.solana().signTransaction(walletId, { transaction: bytes, idempotency_key: `kampit-${walletId}-${randomBytes(12).toString('hex')}` }); bytes = Buffer.from(signed.signed_transaction, 'base64'); } return bytes; }
   private intent(battleId: string, userId: string, kind: PaymentKind) { return this.store.db.prepare('SELECT * FROM pay_intents WHERE battle_id=? AND user_id=? AND kind=?').get(battleId, userId, kind) as PaymentIntent | undefined; }
-  private async confirmed(signature: string, requireEveryProvider = false) { const providers = this.config.fallbackRpcUrl === this.config.rpcUrl ? [this.connection] : [this.connection, this.fallbackConnection]; let checked = 0, lastError: unknown; for (const connection of providers) { try { const status = (await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })).value[0]; checked++; if (status?.err) throw new Error(`Solana transaction ${signature} failed`); if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') return true; } catch (error) { lastError = error; } } if (!checked || (requireEveryProvider && checked !== providers.length)) throw lastError || new Error('Could not verify payment signature with every RPC provider'); return false; }
+  private async confirmed(signature: string, requireEveryProvider = false) { const providers = this.config.fallbackRpcUrl === this.config.rpcUrl ? [this.connection] : [this.connection, this.fallbackConnection]; let checked = 0, lastError: unknown; for (const connection of providers) { let status; try { status = (await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })).value[0]; checked++; } catch (error) { lastError = error; continue; } if (status?.err) throw new Error(`Solana transaction ${signature} failed on chain`); if (status?.confirmationStatus === 'confirmed' || status?.confirmationStatus === 'finalized') return true; } if (!checked || (requireEveryProvider && checked !== providers.length)) throw lastError || new Error('Could not verify payment signature with every RPC provider'); return false; }
   private recordConfirmed(intent: PaymentIntent, signature: string) {
     this.store.db.exec('BEGIN IMMEDIATE');
     try {
@@ -95,7 +99,46 @@ export class DevnetUsdcService {
     await this.rpc(connection => connection.confirmTransaction({ signature, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight }, 'confirmed'));
     this.recordConfirmed(signedIntent, signature); return signature;
   }
-  private payment(battleId: string, userId: string, kind: PaymentKind, amountMinor: number, resolveParties: () => Promise<[ManagedWallet, PublicKey]>) { if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new GameError('Invalid USDC amount'); const key = `${battleId}:${userId}:${kind}`; const active = this.payments.get(key); if (active) return active; const task = (async () => { const prior = this.store.db.prepare('SELECT amount_minor,signature FROM pay_transfers WHERE battle_id=? AND user_id=? AND kind=?').get(battleId, userId, kind) as { amount_minor: number; signature: string } | undefined; if (prior) { if (prior.amount_minor !== amountMinor) throw new Error('Recorded payment amount mismatch'); this.store.db.prepare("INSERT OR IGNORE INTO pay_intents(battle_id,user_id,kind,amount_minor,state,signature,updated_at) VALUES(?,?,?,?,'confirmed',?,?)").run(battleId, userId, kind, amountMinor, prior.signature, Date.now()); return prior.signature; } this.store.db.prepare('INSERT OR IGNORE INTO pay_intents(battle_id,user_id,kind,amount_minor,updated_at) VALUES(?,?,?,?,?)').run(battleId, userId, kind, amountMinor, Date.now()); const intent = this.intent(battleId, userId, kind)!; if (intent.amount_minor !== amountMinor) throw new Error('Payment intent amount mismatch'); const [owner, destination] = await resolveParties(); return this.executePayment(intent, owner, destination); })(); this.payments.set(key, task); void task.finally(() => this.payments.delete(key)).catch(() => {}); return task; }
+  private payment(battleId: string, userId: string, kind: PaymentKind, amountMinor: number, resolveParties: () => Promise<[ManagedWallet, PublicKey]>) { if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new GameError('Invalid USDC amount'); const key = `${battleId}:${userId}:${kind}`; const active = this.payments.get(key); if (active) return active; const task = (async () => { const prior = this.store.db.prepare('SELECT amount_minor,signature FROM pay_transfers WHERE battle_id=? AND user_id=? AND kind=?').get(battleId, userId, kind) as { amount_minor: number; signature: string } | undefined; if (prior) { if (prior.amount_minor !== amountMinor) throw new Error('Recorded payment amount mismatch'); this.store.db.prepare("INSERT OR IGNORE INTO pay_intents(battle_id,user_id,kind,amount_minor,state,signature,updated_at) VALUES(?,?,?,?,'confirmed',?,?)").run(battleId, userId, kind, amountMinor, prior.signature, Date.now()); return prior.signature; } this.store.db.prepare('INSERT OR IGNORE INTO pay_intents(battle_id,user_id,kind,amount_minor,updated_at) VALUES(?,?,?,?,?)').run(battleId, userId, kind, amountMinor, Date.now()); const intent = this.intent(battleId, userId, kind)!; if (intent.amount_minor !== amountMinor) throw new Error('Payment intent amount mismatch'); try { const [owner, destination] = await resolveParties(); return await this.executePayment(intent, owner, destination); } catch (error) { if (error instanceof Error && error.message.includes('failed on chain')) this.store.db.prepare("UPDATE pay_intents SET state='failed',updated_at=? WHERE battle_id=? AND user_id=? AND kind=?").run(Date.now(), battleId, userId, kind); throw error; } })(); this.payments.set(key, task); void task.finally(() => this.payments.delete(key)).catch(() => {}); return task; }
   async lockStake(battleId: string, userId: string, amountMinor: number) { this.assertTester(userId); return this.payment(battleId, userId, 'stake', amountMinor, async () => { const treasury = await this.treasuryWallet(); return [await this.wallet(userId), new PublicKey(treasury.address)]; }); }
   async pay(userId: string, battleId: string, kind: 'payout' | 'refund', amountMinor: number) { return this.payment(battleId, userId, kind, amountMinor, async () => { const [treasury, wallet] = await Promise.all([this.treasuryWallet(), this.wallet(userId)]); return [treasury, new PublicKey(wallet.address)]; }); }
+  async withdraw(userId: string, requestId: string, recipientValue: string, amountMinor: number) { const active = this.withdrawals.get(userId); if (active) await active.catch(() => {}); const task = this.withdrawOnce(userId, requestId, recipientValue, amountMinor); this.withdrawals.set(userId, task); void task.finally(() => { if (this.withdrawals.get(userId) === task) this.withdrawals.delete(userId); }).catch(() => {}); return task; }
+  private async withdrawOnce(userId: string, requestId: string, recipientValue: string, amountMinor: number) {
+    this.assertTester(userId);
+    if (!/^[a-f0-9-]{16,64}$/i.test(requestId)) throw new GameError('Invalid withdrawal request ID');
+    if (!Number.isSafeInteger(amountMinor) || amountMinor < WITHDRAWAL_MIN_MINOR || amountMinor > WITHDRAWAL_MAX_MINOR) throw new GameError('Withdrawal must be between 0.10 and 20.00 test USDC');
+    let recipient: PublicKey; try { recipient = new PublicKey(recipientValue); } catch { throw new GameError('Enter a valid Solana address'); }
+    const existing = this.store.db.prepare('SELECT user_id,recipient,amount_minor FROM pay_withdrawals WHERE id=?').get(requestId) as { user_id: string; recipient: string; amount_minor: number } | undefined;
+    if (existing && (existing.user_id !== userId || existing.recipient !== recipient.toBase58() || existing.amount_minor !== amountMinor)) throw new GameError('Withdrawal request ID was already used');
+    if (!existing) {
+      const since = Date.now() - 86400000;
+      const used = Number((this.store.db.prepare(`SELECT COALESCE(SUM(w.amount_minor),0) AS total FROM pay_withdrawals w LEFT JOIN pay_intents i ON i.battle_id=w.id AND i.user_id=w.user_id AND i.kind='withdrawal' WHERE w.user_id=? AND w.created_at>=? AND COALESCE(i.state,'pending')!='failed'`).get(userId, since) as { total: number }).total);
+      if (used + amountMinor > WITHDRAWAL_DAILY_LIMIT_MINOR) throw new GameError('Daily withdrawal limit is 100 test USDC');
+      const pending = Number((this.store.db.prepare(`SELECT COALESCE(SUM(w.amount_minor),0) AS total FROM pay_withdrawals w LEFT JOIN pay_intents i ON i.battle_id=w.id AND i.user_id=w.user_id AND i.kind='withdrawal' WHERE w.user_id=? AND COALESCE(i.state,'pending')!='failed' AND COALESCE(i.state,'pending')!='confirmed'`).get(userId) as { total: number }).total);
+      if (await this.balanceMinor(userId) < pending + amountMinor) throw new GameError('Insufficient test USDC balance');
+      this.store.db.prepare('INSERT INTO pay_withdrawals(id,user_id,recipient,amount_minor,created_at) VALUES(?,?,?,?,?)').run(requestId, userId, recipient.toBase58(), amountMinor, Date.now());
+    }
+    return this.payment(requestId, userId, 'withdrawal', amountMinor, async () => [await this.wallet(userId), recipient]);
+  }
+  history(userId: string, limit = 50) {
+    this.assertTester(userId);
+    return (this.store.db.prepare(`SELECT i.battle_id AS id,i.kind,i.amount_minor AS amountMinor,i.state,i.signature,i.attempt,i.updated_at AS updatedAt,w.recipient FROM pay_intents i LEFT JOIN pay_withdrawals w ON w.id=i.battle_id AND i.kind='withdrawal' WHERE i.user_id=? ORDER BY i.updated_at DESC LIMIT ?`).all(userId, Math.min(100, Math.max(1, limit))) as any[]).map(row => ({ ...row, explorerUrl: row.signature ? `https://explorer.solana.com/tx/${row.signature}?cluster=devnet` : null }));
+  }
+  async reconcile() {
+    const rows = this.store.db.prepare("SELECT * FROM pay_intents WHERE state IN ('pending','signed') ORDER BY updated_at LIMIT 100").all() as PaymentIntent[];
+    let recovered = 0, failed = 0;
+    for (const row of rows) {
+      try {
+        if (row.kind === 'withdrawal') { const withdrawal = this.store.db.prepare('SELECT recipient FROM pay_withdrawals WHERE id=?').get(row.battle_id) as { recipient: string } | undefined; if (!withdrawal) throw new Error('Withdrawal metadata missing'); await this.payment(row.battle_id, row.user_id, row.kind, row.amount_minor, async () => [await this.wallet(row.user_id), new PublicKey(withdrawal.recipient)]); }
+        else if (row.kind === 'stake') { await this.lockStake(row.battle_id, row.user_id, row.amount_minor); }
+        else await this.pay(row.user_id, row.battle_id, row.kind, row.amount_minor);
+        recovered++;
+      } catch (error) { failed++; console.error('Payment reconciliation:', row.battle_id, row.kind, error); }
+    }
+    const treasury = await this.treasuryWallet(), treasuryAddress = new PublicKey(treasury.address), treasuryToken = getAssociatedTokenAddressSync(this.mint, treasuryAddress);
+    const solLamports = await this.rpc(connection => connection.getBalance(treasuryAddress, 'confirmed'));
+    let usdcMinor = 0; try { usdcMinor = Number((await this.rpc(connection => getAccount(connection, treasuryToken))).amount); } catch {}
+    const obligationsMinor = Number((this.store.db.prepare("SELECT COALESCE(SUM(amount_minor),0) AS total FROM pay_intents WHERE kind IN ('payout','refund') AND state IN ('pending','signed')").get() as { total: number }).total);
+    return { checked: rows.length, recovered, failed, pending: rows.length - recovered, treasury: { solLamports, usdcMinor, obligationsMinor }, alerts: [...(solLamports < 10_000_000 ? ['Treasury SOL is below 0.01 SOL'] : []), ...(usdcMinor < obligationsMinor ? ['Treasury USDC is below pending payout obligations'] : []), ...(failed ? [`${failed} payment reconciliation attempt(s) need attention`] : [])] };
+  }
 }

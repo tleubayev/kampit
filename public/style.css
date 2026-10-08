@@ -80,6 +80,17 @@ footer { text-align: center; color: #6c7a94; font-size: 11px; margin-top: 20px; 
 .statsGrid strong { display: block; font-size: 21px; }
 .statsGrid small { display: block; color: var(--muted); font-size: 9px; letter-spacing: .1em; }
 .inviteLink { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; margin-top: 12px; }
+.payTools { margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); text-align: left; }
+.payTitle, .txRow { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.payTitle { font-size: 11px; letter-spacing: .08em; }
+.payTitle span, .walletAddress { color: var(--muted); }
+.walletAddress { margin: 8px 0; padding: 8px; border-radius: 9px; background: #0b1222; font: 10px/1.35 ui-monospace, monospace; overflow-wrap: anywhere; }
+.withdrawGrid { display: grid; grid-template-columns: 1fr 100px; gap: 7px; }
+.withdrawGrid input { min-width: 0; height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: #0b1222; color: var(--text); font: inherit; }
+.withdrawGrid button { grid-column: 1 / -1; min-height: 40px; }
+.txList { margin-top: 10px; border-top: 1px solid var(--line); }
+.txRow { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
+.txRow a { text-decoration: none; font-weight: 800; }
 .home .hero, .home .clock, .home .playersPanel, .home .statsPanel, .home .leaderboardPanel { display: none; }
 .landingPage { display: none; }
 .marketing { background: #080d19; }

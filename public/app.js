@@ -28,18 +28,20 @@ async function openBattle(id, updateAddress=false) {
   stream?.close();stream=undefined;state=undefined;lastServerNow=0;battleId=id;
   if(updateAddress){const url=new URL(location.href);url.searchParams.set('battle',id);history.replaceState({},'',url);}
   const initial=await api(`/api/battles/${battleId}`); render(initial);
-  if(initial.battle.mode==='USDC_TEST'){payInfo=await api('/api/pay');render(initial);}
+  if(initial.battle.mode==='USDC_TEST'){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};render(initial);}
   stream=new EventSource(`/api/battles/${battleId}/events`);
   stream.onmessage=event=>render(JSON.parse(event.data));
   stream.onerror=()=>{el('feedTime').textContent='RECONNECTING';};
 }
 async function action(name,data) {
   if(requestBusy)return;requestBusy=true;
-  try { const result=await api(`/api/battles/${battleId}/${name}`,'POST',data); if(name==='rematch') await openBattle(result.id,true); else render(result); }
+  try { const result=await api(`/api/battles/${battleId}/${name}`,'POST',data); if(name==='rematch') await openBattle(result.id,true); else { if(result.battle?.mode==='USDC_TEST'&&name==='ready'){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};} render(result); } }
   catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);} finally {requestBusy=false;}
 }
 window.doAction=action;
 window.openTestUsdcFaucet=()=>{const url='https://faucet.circle.com/';if(tg?.openLink)tg.openLink(url);else window.open(url,'_blank');};
+window.submitWithdrawal=async()=>{const recipient=el('withdrawAddress')?.value.trim(),amount=Number(el('withdrawAmount')?.value);if(!recipient||!Number.isFinite(amount))return;try{const result=await api('/api/pay/withdrawals','POST',{requestId:crypto.randomUUID().replaceAll('-',''),recipient,amountMinor:Math.round(amount*1e6)});payInfo={...payInfo,balanceMinor:result.balanceMinor,transactions:result.transactions};if(state)render(state);}catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);}};
+function payTools(){if(!payInfo)return'';const transactions=(payInfo.transactions||[]).slice(0,8);return `<div class="payTools"><div class="payTitle"><b>TEST USDC WALLET</b><span>${(payInfo.balanceMinor/1e6).toFixed(2)} USDC</span></div><div class="walletAddress">${safe(payInfo.walletAddress)}</div><div class="withdrawGrid"><input id="withdrawAddress" autocomplete="off" placeholder="Solana withdrawal address"><input id="withdrawAmount" inputmode="decimal" placeholder="USDC amount"><button class="secondary" onclick="submitWithdrawal()">WITHDRAW</button></div><div class="small">Limits: 0.10–20 USDC per withdrawal · 100 USDC per 24 hours</div><div class="txList">${transactions.length?transactions.map(tx=>`<div class="txRow"><span>${safe(tx.kind).toUpperCase()} · ${(tx.amountMinor/1e6).toFixed(2)}</span><a class="${tx.state==='confirmed'?'green':tx.state==='failed'?'red':'purple'}" ${tx.explorerUrl?`href="${safe(tx.explorerUrl)}" target="_blank"`:''}>${safe(tx.state).toUpperCase()}</a></div>`).join(''):'<div class="small">No transactions yet.</div>'}</div></div>`;}
 function showAccount(info) {
   accountInfo=info;
   el('balance').textContent=`${info.account.balance} XP`;
@@ -69,7 +71,7 @@ function render(data) {
     const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?'<button class="primary" onclick="doAction(\'ready\')">I’M READY</button>':'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
     const start=creator&&readyCount>=2?'<button class="primary" onclick="doAction(\'start\')">START NOW</button>':'';
     const faucet=paid&&payInfo&&payInfo.balanceMinor<b.stakeMinor?'<button class="secondary" onclick="openTestUsdcFaucet()">GET TEST USDC FROM CIRCLE</button>':'';
-    html=`<h1>${paid?'Devnet pay battle':'Join the battle'}</h1><p>${paid?'Test tokens have no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins with the first ready player. Unready players are excluded. ${readyCount} ready.</p>${faucet}${action}${start}`;
+    html=`<h1>${paid?'Devnet pay battle':'Join the battle'}</h1><p>${paid?'Test tokens have no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins with the first ready player. Unready players are excluded. ${readyCount} ready.</p>${faucet}${action}${start}${paid?payTools():''}`;
   }
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {

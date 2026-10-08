@@ -64,6 +64,21 @@ test('payment tables enforce one transfer kind per user and battle', () => {
   insert.run(); assert.throws(() => insert.run()); store.close();
 });
 
+test('withdrawals validate limits and appear in the confirmation history', async () => {
+  const store = new Store(':memory:'); store.ensureAccount('1', 'Ali');
+  const config = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set(['1']) };
+  const privy = { create: async () => ({ id: 'user-wallet', address: Keypair.generate().publicKey.toBase58() }), import: async () => { throw new Error('unexpected'); }, solana: () => ({ signTransaction: async () => { throw new Error('unexpected'); } }) };
+  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, config, privy);
+  await assert.rejects(() => service.withdraw('1', 'a'.repeat(16), Keypair.generate().publicKey.toBase58(), 99_999), /between 0.10 and 20.00/);
+  const now = Date.now();
+  for (let index = 0; index < 5; index++) {
+    const id = `${index}`.repeat(16); store.db.prepare('INSERT INTO pay_withdrawals(id,user_id,recipient,amount_minor,created_at) VALUES(?,?,?,?,?)').run(id, '1', Keypair.generate().publicKey.toBase58(), 20_000_000, now);
+    store.db.prepare("INSERT INTO pay_intents(battle_id,user_id,kind,amount_minor,state,signature,updated_at) VALUES(?,?, 'withdrawal',?,'confirmed',?,?)").run(id, '1', 20_000_000, Keypair.generate().publicKey.toBase58(), now);
+  }
+  await assert.rejects(() => service.withdraw('1', 'f'.repeat(16), Keypair.generate().publicKey.toBase58(), 100_000), /Daily withdrawal limit/);
+  const history = service.history('1'); assert.equal(history.length, 5); assert.equal(history[0].kind, 'withdrawal'); assert.equal(history[0].state, 'confirmed'); assert.match(history[0].explorerUrl, /cluster=devnet/); store.close();
+});
+
 test('paid rounds use test-USDC readiness without changing XP balances', () => {
   const store = new Store(':memory:'), engine = new Engine(store);
   const battle = engine.createPaid('g', 100_000, '1', 1000);

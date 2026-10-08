@@ -37,6 +37,15 @@ export class Store {
       CREATE TABLE IF NOT EXISTS pay_faucets (user_id TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL, signature TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS pay_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, battle_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('stake','payout','refund')), amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), signature TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, UNIQUE(battle_id,user_id,kind));
       CREATE TABLE IF NOT EXISTS pay_intents (battle_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('stake','payout','refund')), amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','signed','confirmed')), signature TEXT UNIQUE, raw_transaction TEXT, blockhash TEXT, last_valid_block_height INTEGER, attempt INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, PRIMARY KEY(battle_id,user_id,kind));`);
+    const intentSql = (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='pay_intents'").get() as { sql: string }).sql;
+    if (!intentSql.includes("'withdrawal'")) this.db.exec(`BEGIN IMMEDIATE;
+      ALTER TABLE pay_intents RENAME TO pay_intents_legacy;
+      CREATE TABLE pay_intents (battle_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('stake','payout','refund','withdrawal')), amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','signed','confirmed','failed')), signature TEXT UNIQUE, raw_transaction TEXT, blockhash TEXT, last_valid_block_height INTEGER, attempt INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, PRIMARY KEY(battle_id,user_id,kind));
+      INSERT INTO pay_intents SELECT * FROM pay_intents_legacy; DROP TABLE pay_intents_legacy;
+      ALTER TABLE pay_transfers RENAME TO pay_transfers_legacy;
+      CREATE TABLE pay_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, battle_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('stake','payout','refund','withdrawal')), amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), signature TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, UNIQUE(battle_id,user_id,kind));
+      INSERT INTO pay_transfers SELECT * FROM pay_transfers_legacy; DROP TABLE pay_transfers_legacy; COMMIT;`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS pay_withdrawals (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, recipient TEXT NOT NULL, amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), created_at INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS pay_withdrawals_user_date ON pay_withdrawals(user_id,created_at DESC);`);
     const payWalletColumns = this.db.prepare('PRAGMA table_info(pay_wallets)').all() as { name: string }[];
     if (!payWalletColumns.some(c => c.name === 'privy_wallet_id')) this.db.exec('ALTER TABLE pay_wallets ADD COLUMN privy_wallet_id TEXT');
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS pay_wallets_privy_id ON pay_wallets(privy_wallet_id) WHERE privy_wallet_id IS NOT NULL');
