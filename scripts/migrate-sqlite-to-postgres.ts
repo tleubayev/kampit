@@ -7,6 +7,7 @@ const targetUrl = process.env.POSTGRES_MIGRATION_URL || '';
 if (!targetUrl) throw new Error('POSTGRES_MIGRATION_URL is required');
 
 const sqlite = new DatabaseSync(sourcePath, { readOnly: true });
+sqlite.exec('BEGIN');
 const pg = postgres(targetUrl, { max: 1, prepare: false, idle_timeout: 5 });
 const schema = await readFile(new URL('../db/postgres-schema.sql', import.meta.url), 'utf8');
 
