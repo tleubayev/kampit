@@ -1,5 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { SyncPostgresDatabase } from './sync-postgres.ts';
 
 export type Status = 'lobby' | 'countdown' | 'live' | 'finished' | 'void';
 export type Side = 'LONG' | 'SHORT';
@@ -15,10 +17,15 @@ export function dailyDate(now: number, timeZone: string) {
 function daysBetween(from: string, to: string) { return Math.max(0, Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000)); }
 
 export class Store {
-  db: DatabaseSync;
+  db: DatabaseSync | SyncPostgresDatabase;
   timeZone: string;
-  constructor(path: string, timeZone = 'UTC') {
+  constructor(path: string, timeZone = 'UTC', postgresUrl = '') {
     this.timeZone = timeZone;
+    if (postgresUrl) {
+      this.db = new SyncPostgresDatabase(postgresUrl);
+      this.db.exec(readFileSync(new URL('../db/postgres-schema.sql', import.meta.url), 'utf8'));
+      return;
+    }
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS battles (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, countdown_at INTEGER, start_at INTEGER, lock_at INTEGER, end_at INTEGER, start_price REAL, end_price REAL, outcome TEXT, message_id INTEGER, parent_id TEXT UNIQUE, successor_id TEXT);

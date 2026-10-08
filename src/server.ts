@@ -23,7 +23,8 @@ const adminPassword = process.env.ADMIN_PASSWORD || '';
 if (!token || !username || !shortName || !appUrl || !webhookSecret || webhookSecret.length < 16) {
   console.error('Set BOT_TOKEN, BOT_USERNAME, MINI_APP_SHORT_NAME, APP_URL and WEBHOOK_SECRET (16+ chars).'); process.exit(1);
 }
-const store = new Store(process.env.DATABASE_PATH || './battle.sqlite', 'UTC');
+const postgresUrl = process.env.DATABASE_BACKEND === 'postgres' ? process.env.DATABASE_URL || '' : '';
+const store = new Store(process.env.DATABASE_PATH || './battle.sqlite', 'UTC', postgresUrl);
 const payConfig = payConfigFromEnv();
 validatePayConfig(payConfig);
 if (payConfig.enabled && adminPassword.length < 16) { console.error('ADMIN_PASSWORD (16+ chars) is required when pay mode is enabled.'); process.exit(1); }
