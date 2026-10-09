@@ -92,6 +92,9 @@ footer { text-align: center; color: #6c7a94; font-size: 11px; margin-top: 20px; 
 .withdrawGrid input { min-width: 0; height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: #0b1222; color: var(--text); font: inherit; }
 .withdrawGrid button { grid-column: 1 / -1; min-height: 40px; }
 .txList { margin-top: 10px; border-top: 1px solid var(--line); }
+.txToggle { width: 100%; min-height: 38px; padding: 8px 0; display: flex; align-items: center; justify-content: space-between; background: transparent; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+.txToggle b { color: var(--text); font-size: 15px; }
+.txMore { width: 100%; padding: 10px 0 3px; background: transparent; color: var(--purple); font-size: 10px; font-weight: 800; letter-spacing: .1em; }
 .faucetClaim { width: 100%; min-height: 42px; margin: 10px 0 7px; }
 .txRow { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
 .txRow a { text-decoration: none; font-weight: 800; }
