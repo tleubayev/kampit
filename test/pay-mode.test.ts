@@ -138,6 +138,17 @@ test('paid rounds use test-USDC readiness without changing XP balances', () => {
   store.close();
 });
 
+test('orphaned confirmed stakes recover from the operating wallet idempotently', async () => {
+  const store = new Store(':memory:'); store.ensureAccount('1', 'Ali');
+  const engine = new Engine(store), battle = engine.createPaid('g', 100_000, '1', 1000); engine.join(battle.id, '1', 'Ali');
+  store.db.prepare("INSERT INTO pay_intents(battle_id,user_id,kind,amount_minor,state,signature,updated_at) VALUES(?,?, 'stake',?,'confirmed',?,?)").run(battle.id, '1', 100_000, 'stake-signature', 1);
+  const config = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set(['1']) };
+  const privy = { create: async () => { throw new Error('unexpected'); }, import: async () => { throw new Error('unexpected'); }, solana: () => ({ signTransaction: async () => { throw new Error('unexpected'); } }) };
+  const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, config, privy); let calls = 0;
+  (service as any).payment = async (id: string, userId: string, kind: string, amount: number) => { calls++; assert.equal(id, `recovery:${battle.id}`); assert.equal(userId, '1'); assert.equal(kind, 'payout'); assert.equal(amount, 100_000); return 'recovery-signature'; };
+  assert.equal((await service.recoverOrphanStakes(battle.id)).length, 1); assert.equal(calls, 1); store.close();
+});
+
 test('rejects a transaction modified by the wallet signer', async () => {
   const store = new Store(':memory:'), treasury = Keypair.generate();
   const config = { enabled: true, cluster: 'devnet' as const, rpcUrl: 'http://primary.test', fallbackRpcUrl: 'http://fallback.test', treasurySecret: '', encryptionKey: '', privyAppId: 'app-id', privyAppSecret: 'app-secret', privyTreasuryWalletId: 'treasury-wallet', allowedUsers: new Set(['1']) };

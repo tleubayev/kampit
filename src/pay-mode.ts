@@ -124,6 +124,17 @@ export class DevnetUsdcService {
   }
   async pay(userId: string, battleId: string, kind: 'payout' | 'refund', amountMinor: number) { return this.payment(battleId, userId, kind, amountMinor, async () => { const [treasury, wallet] = await Promise.all([this.treasuryWallet(), this.wallet(userId)]); return [treasury, new PublicKey(wallet.address)]; }); }
   async house(battleId: string, amountMinor: number) { return this.payment(battleId, 'house', 'house', amountMinor, async () => { const [escrow, operating] = await Promise.all([this.treasuryWallet(), this.operatingWallet()]); return [escrow, new PublicKey(operating.address)]; }); }
+  async recoverOrphanStakes(battleId: string) {
+    const paid = this.store.paidBattle(battleId); if (!paid) throw new GameError('Paid battle not found', 404);
+    const rows = this.store.db.prepare("SELECT p.user_id FROM players p JOIN pay_intents i ON i.battle_id=p.battle_id AND i.user_id=p.user_id AND i.kind='stake' AND i.state='confirmed' WHERE p.battle_id=? AND p.ready=0").all(battleId) as { user_id: string }[];
+    const recovered: { userId: string; signature: string }[] = [];
+    for (const row of rows) {
+      const recoveryId = `recovery:${battleId}`;
+      const signature = await this.payment(recoveryId, row.user_id, 'payout', paid.stake_minor, async () => { const [operating, wallet] = await Promise.all([this.operatingWallet(), this.wallet(row.user_id)]); return [operating, new PublicKey(wallet.address)]; });
+      recovered.push({ userId: row.user_id, signature });
+    }
+    return recovered;
+  }
   faucetStatus(userId: string) {
     this.assertTester(userId);
     const claim = this.store.db.prepare('SELECT amount_minor,signature,created_at FROM pay_faucets WHERE user_id=? AND amount_minor=?').get(userId, DEVNET_FAUCET_AMOUNT_MINOR) as { amount_minor: number; signature: string; created_at: number } | undefined;
@@ -180,7 +191,7 @@ export class DevnetUsdcService {
         if (row.kind === 'withdrawal') { const withdrawal = this.store.db.prepare("SELECT recipient FROM pay_withdrawals WHERE id=? AND approval_status IN ('auto','approved')").get(row.battle_id) as { recipient: string } | undefined; if (!withdrawal) continue; await this.payment(row.battle_id, row.user_id, row.kind, row.amount_minor, async () => [await this.wallet(row.user_id), new PublicKey(withdrawal.recipient)]); }
         else if (row.kind === 'stake') { await this.lockStake(row.battle_id, row.user_id, row.amount_minor); }
         else if (row.kind === 'house') { await this.house(row.battle_id, row.amount_minor); }
-        else if (row.kind === 'payout' && row.battle_id === `faucet:${row.user_id}`) { const [operating, wallet] = await Promise.all([this.operatingWallet(), this.wallet(row.user_id)]); const signature = await this.payment(row.battle_id, row.user_id, row.kind, row.amount_minor, async () => [operating, new PublicKey(wallet.address)]); this.store.db.prepare('INSERT OR IGNORE INTO pay_faucets(user_id,amount_minor,signature,created_at) VALUES(?,?,?,?)').run(row.user_id, row.amount_minor, signature, Date.now()); }
+        else if (row.kind === 'payout' && (row.battle_id === `faucet:${row.user_id}` || row.battle_id.startsWith('recovery:'))) { const [operating, wallet] = await Promise.all([this.operatingWallet(), this.wallet(row.user_id)]); const signature = await this.payment(row.battle_id, row.user_id, row.kind, row.amount_minor, async () => [operating, new PublicKey(wallet.address)]); if (row.battle_id === `faucet:${row.user_id}`) this.store.db.prepare('INSERT OR IGNORE INTO pay_faucets(user_id,amount_minor,signature,created_at) VALUES(?,?,?,?)').run(row.user_id, row.amount_minor, signature, Date.now()); }
         else await this.pay(row.user_id, row.battle_id, row.kind, row.amount_minor);
         recovered++;
       } catch (error) { failed++; console.error('Payment reconciliation:', row.battle_id, row.kind, error); }

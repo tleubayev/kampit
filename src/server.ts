@@ -212,6 +212,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === 'GET' && path === '/admin/withdrawals') { if (!requireAdmin(req, res)) return; json(res, 200, { withdrawals: payMode?.pendingWithdrawals() || [] }); return; }
     if (req.method === 'POST' && path.startsWith('/admin/withdrawals/')) { if (!requireAdmin(req, res)) return; requireAppOrigin(req); if (!payMode) throw new GameError('Test pay mode is disabled', 404); const parts = path.split('/').filter(Boolean), data = await body(req); const result = await payMode.decideWithdrawal(parts[2], data.approve === true); await reconcilePayments(); json(res, 200, result); return; }
+    if (req.method === 'POST' && path === '/admin/recover-orphan-stakes') { if (!requireAdmin(req, res)) return; requireAppOrigin(req); if (!payMode) throw new GameError('Test pay mode is disabled', 404); const data = await body(req), battleId = String(data.battleId || ''); if (!/^[a-f0-9]{16}$/.test(battleId)) throw new GameError('Invalid battle'); const recovered = await payMode.recoverOrphanStakes(battleId); json(res, 200, { recovered: recovered.length, payments: recovered.map(item => ({ signature: item.signature })) }); return; }
     if (req.method === 'POST' && path === '/telegram/webhook') {
       if (!sameSecret(String(req.headers['x-telegram-bot-api-secret-token'] || ''), webhookSecret)) throw new GameError('Forbidden', 403);
       const update = await body(req) as any;
