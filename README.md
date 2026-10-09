@@ -80,7 +80,7 @@ Run `npm test` on Node.js 24. Tests cover Telegram auth, stake reservation and p
 
 ## Deployment
 
-Build with `docker build -t sol-quick-battle .`, then run the container behind HTTPS with a persistent volume mounted at `/data` and the required environment variables. Alternatively, run Node.js directly behind a reverse proxy. Set the six required environment variables and use a process supervisor. `/health` reports service and price freshness. For production scaling beyond one process, move sessions and the scheduler to shared coordination and use a hosted database.
+Build with `docker build -t kampit .`, then run the container behind HTTPS with a persistent volume mounted at `/data` and the required environment variables. Alternatively, run Node.js directly behind a reverse proxy. Set the six required environment variables and use a process supervisor. `/health` reports service and price freshness. For production scaling beyond one process, move sessions and the scheduler to shared coordination and use a hosted database.
 
 ## Railway deployment
 
