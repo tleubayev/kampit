@@ -5,6 +5,7 @@ import { SlidingWindowRateLimiter } from './rate-limit.ts';
 type TgUser = { id: number; first_name: string; last_name?: string };
 type TgMessage = { message_id: number; chat: { id: number; type: string }; from?: TgUser; text?: string; migrate_to_chat_id?: number; migrate_from_chat_id?: number };
 type Update = { update_id: number; message?: TgMessage; callback_query?: { id: string; from: TgUser; message?: TgMessage; data?: string } };
+const direction = (value: string | null) => value === 'LONG' ? 'UP' : value === 'SHORT' ? 'DOWN' : value;
 
 export class Bot {
   private token: string; private username: string; private shortName: string; private engine: Engine;
@@ -59,7 +60,7 @@ export class Bot {
     const poolLabel = paid ? `${(pool / 1_000_000).toFixed(2)} test USDC` : `${pool} XP`;
     const text = battle.status === 'void'
       ? `⚠️ SOL QUICK BATTLE VOID\nAll staked ${paid ? 'test USDC' : 'XP'} was refunded.`
-      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${battle.outcome} WINS`}\n\nSOL/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${poolLabel} retained by the test house.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `${paid ? 'Winners split the pool after the 1% house fee' : `Winners split ${poolLabel}`}: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
+      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${direction(battle.outcome)} WINS`}\n\nSOL/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${poolLabel} retained by the test house.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `${paid ? 'Winners split the pool after the 1% house fee' : `Winners split ${poolLabel}`}: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
     await this.call('sendMessage', { chat_id: battle.chat_id, text,
       reply_markup: { inline_keyboard: [[{ text: 'VIEW RESULT / REMATCH', url: this.link(battle.id) }]] } });
   }
@@ -117,7 +118,7 @@ export class Bot {
       this.engine.store.ensureAccount(String(message.from.id), message.from.first_name);
       await this.call('sendMessage', { chat_id: chatId, text: `${awarded ? 'Invitation accepted. ' : ''}You have 1000 starting XP. Add me to a group and send /battle to choose a stake and play.` });
     } else if (command === '/help') {
-      await this.call('sendMessage', { chat_id: chatId, text: 'Add this bot to a group. Use /battle for 2–100 player XP games or /paybattle for 2–10 player Solana Devnet games. The lobby runs for 30 seconds after the first player readies up, and unready players are excluded. Pick LONG or SHORT in the first 10 seconds of a 60-second round. Every account receives 100 XP daily at 00:00 UTC.' });
+      await this.call('sendMessage', { chat_id: chatId, text: 'Add this bot to a group. Use /battle for 2–100 player XP games or /paybattle for 2–10 player Solana Devnet games. The lobby runs for 30 seconds after the first player readies up, and unready players are excluded. Pick UP or DOWN in the first 10 seconds of a 60-second round. Every account receives 100 XP daily at 00:00 UTC.' });
     }
   }
   async startBattle(message: TgMessage, creator: TgUser, stake: number) {
