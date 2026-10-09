@@ -163,11 +163,14 @@ export class DevnetUsdcService {
     if (approval === 'rejected') throw new GameError('Withdrawal was rejected', 403);
     const signature = await this.payment(requestId, userId, 'withdrawal', amountMinor, async () => [await this.wallet(userId), recipient]); return { status: 'confirmed', signature };
   }
-  pendingWithdrawals() { return this.store.db.prepare("SELECT id,recipient,amount_minor AS amountMinor,created_at AS createdAt FROM pay_withdrawals WHERE approval_status='pending' ORDER BY created_at").all(); }
+  pendingWithdrawals() {
+    return (this.store.db.prepare("SELECT id,recipient,amount_minor,created_at FROM pay_withdrawals WHERE approval_status='pending' ORDER BY created_at").all() as any[])
+      .map(row => ({ id: row.id, recipient: row.recipient, amountMinor: Number(row.amount_minor), createdAt: Number(row.created_at) }));
+  }
   async decideWithdrawal(id: string, approve: boolean) { const row = this.store.db.prepare('SELECT user_id,recipient,amount_minor,approval_status FROM pay_withdrawals WHERE id=?').get(id) as { user_id: string; recipient: string; amount_minor: number; approval_status: string } | undefined; if (!row) throw new GameError('Withdrawal not found', 404); if (row.approval_status !== 'pending') throw new GameError('Withdrawal was already decided'); this.store.db.prepare('UPDATE pay_withdrawals SET approval_status=?,approved_at=?,approved_by=? WHERE id=?').run(approve ? 'approved' : 'rejected', Date.now(), 'admin', id); if (!approve) { this.store.db.prepare("UPDATE pay_intents SET state='failed',updated_at=? WHERE battle_id=? AND user_id=? AND kind='withdrawal'").run(Date.now(), id, row.user_id); return { status: 'rejected' }; } return this.withdraw(row.user_id, id, row.recipient, row.amount_minor); }
   history(userId: string, limit = 50) {
     this.assertTester(userId);
-    return (this.store.db.prepare(`SELECT i.battle_id AS id,i.kind,i.amount_minor AS amountMinor,i.state,i.signature,i.attempt,i.updated_at AS updatedAt,w.recipient FROM pay_intents i LEFT JOIN pay_withdrawals w ON w.id=i.battle_id AND i.kind='withdrawal' WHERE i.user_id=? ORDER BY i.updated_at DESC LIMIT ?`).all(userId, Math.min(100, Math.max(1, limit))) as any[]).map(row => ({ ...row, explorerUrl: row.signature ? `https://explorer.solana.com/tx/${row.signature}?cluster=devnet` : null }));
+    return (this.store.db.prepare(`SELECT i.battle_id AS id,i.kind,i.amount_minor,i.state,i.signature,i.attempt,i.updated_at,w.recipient FROM pay_intents i LEFT JOIN pay_withdrawals w ON w.id=i.battle_id AND i.kind='withdrawal' WHERE i.user_id=? ORDER BY i.updated_at DESC LIMIT ?`).all(userId, Math.min(100, Math.max(1, limit))) as any[]).map(row => ({ id: row.id, kind: row.kind, amountMinor: Number(row.amount_minor), state: row.state, signature: row.signature, attempt: Number(row.attempt), updatedAt: Number(row.updated_at), recipient: row.recipient, explorerUrl: row.signature ? `https://explorer.solana.com/tx/${row.signature}?cluster=devnet` : null }));
   }
   async reconcile() {
     const rows = this.store.db.prepare("SELECT * FROM pay_intents WHERE state IN ('pending','signed') ORDER BY updated_at LIMIT 100").all() as PaymentIntent[];

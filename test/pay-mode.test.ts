@@ -79,7 +79,7 @@ test('withdrawals validate limits and appear in the confirmation history', async
     store.db.prepare("INSERT INTO pay_intents(battle_id,user_id,kind,amount_minor,state,signature,updated_at) VALUES(?,?, 'withdrawal',?,'confirmed',?,?)").run(id, '1', 20_000_000, Keypair.generate().publicKey.toBase58(), now);
   }
   await assert.rejects(() => service.withdraw('1', 'f'.repeat(16), Keypair.generate().publicKey.toBase58(), 100_000), /Daily withdrawal limit/);
-  const history = service.history('1'); assert.equal(history.length, 5); assert.equal(history[0].kind, 'withdrawal'); assert.equal(history[0].state, 'confirmed'); assert.match(history[0].explorerUrl, /cluster=devnet/); store.close();
+  const history = service.history('1'); assert.equal(history.length, 5); assert.equal(history[0].kind, 'withdrawal'); assert.equal(history[0].state, 'confirmed'); assert.equal(history[0].amountMinor, 20_000_000); assert.equal(typeof history[0].updatedAt, 'number'); assert.match(history[0].explorerUrl, /cluster=devnet/); store.close();
 });
 
 test('withdrawals over 5 test USDC require an admin decision', async () => {
@@ -89,7 +89,7 @@ test('withdrawals over 5 test USDC require an admin decision', async () => {
   const service = new (await import('../src/pay-mode.ts')).DevnetUsdcService(store, config, privy); (service as any).balanceMinor = async () => 10_000_000;
   const id = 'a'.repeat(20), recipient = Keypair.generate().publicKey.toBase58();
   assert.deepEqual(await service.withdraw('1', id, recipient, 6_000_000), { status: 'approval_required' });
-  assert.equal(service.pendingWithdrawals().length, 1); assert.equal(service.history('1')[0].state, 'pending');
+  assert.equal(service.pendingWithdrawals().length, 1); assert.equal((service.pendingWithdrawals()[0] as any).amountMinor, 6_000_000); assert.equal(service.history('1')[0].state, 'pending');
   assert.deepEqual(await service.decideWithdrawal(id, false), { status: 'rejected' }); assert.equal(service.pendingWithdrawals().length, 0); store.close();
 });
 
