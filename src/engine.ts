@@ -99,7 +99,9 @@ export class Engine extends EventEmitter {
     if (battle.status !== 'lobby') throw new GameError('Lobby is closed');
     const result = this.store.db.prepare("UPDATE players SET ready=1 WHERE battle_id=? AND user_id=? AND ready=0 AND ?='lobby'").run(id, userId, battle.status);
     if (!result.changes) throw new GameError('Could not ready player');
-    this.store.db.prepare("UPDATE battles SET lobby_deadline=COALESCE(lobby_deadline,?) WHERE id=? AND status='lobby'").run(Math.min(now + LOBBY_READY_MS, battle.created_at + LOBBY_MAX_MS), id);
+    if (this.readyCount(id) >= 2) {
+      this.store.db.prepare("UPDATE battles SET lobby_deadline=COALESCE(lobby_deadline,?) WHERE id=? AND status='lobby'").run(Math.min(now + LOBBY_READY_MS, battle.created_at + LOBBY_MAX_MS), id);
+    }
     this.emit('change', this.require(id));
   }
   startNow(id: string, userId: string, now = Date.now()) {

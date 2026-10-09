@@ -45,6 +45,25 @@ test('ten-player paid round advances with all funded players', () => {
   store.close();
 });
 
+test('paid lobby timer starts only after the second funded player', () => {
+  const { store, engine } = fixture();
+  const battle = engine.createPaid('g', 100_000, '1', 1000);
+  engine.join(battle.id, '1', 'A'); engine.join(battle.id, '2', 'B');
+  engine.readyPaid(battle.id, '1', 2000);
+  assert.equal(engine.require(battle.id).lobby_deadline, null);
+  engine.readyPaid(battle.id, '2', 5000);
+  assert.equal(engine.require(battle.id).lobby_deadline, 35000);
+  engine.tick(35000, quote(100, 35000));
+  assert.equal(engine.require(battle.id).status, 'countdown');
+  const waiting = engine.createPaid('g2', 100_000, '3', 1000);
+  engine.join(waiting.id, '3', 'C'); engine.readyPaid(waiting.id, '3', 2000);
+  engine.tick(300_999, null);
+  assert.equal(engine.require(waiting.id).status, 'lobby');
+  engine.tick(301_000, null);
+  assert.equal(engine.require(waiting.id).status, 'void');
+  store.close();
+});
+
 test('stake is fixed, reserved on ready, and winners split the full pool', () => {
   const { store, engine } = fixture();
   assert.throws(() => engine.create('g', 9, '1', 1000), GameError);
