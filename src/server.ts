@@ -40,6 +40,7 @@ const streams = new Map<string, Set<{ res: ServerResponse; userId: string; sessi
 const pendingUpdates = new Map<number, Promise<void>>();
 const delivering = new Set<string>();
 const settling = new Set<string>();
+const funding = new Map<string, Set<string>>();
 const apiLimiter = new SlidingWindowRateLimiter();
 const actionLimiter = new SlidingWindowRateLimiter();
 const sessionLimiter = new SlidingWindowRateLimiter();
@@ -103,9 +104,10 @@ function view(id: string, userId: string) {
     const funded = Number((store.db.prepare("SELECT COUNT(*) AS count FROM pay_intents WHERE battle_id=? AND kind='stake' AND state='confirmed'").get(id) as { count: number }).count);
     const settlement = store.db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN state='confirmed' THEN 1 ELSE 0 END),0) AS confirmed FROM pay_intents WHERE battle_id=? AND kind IN ('payout','refund','house')").get(id) as { total: number; confirmed: number };
     const confirmedIds = new Set((store.db.prepare("SELECT user_id FROM pay_intents WHERE battle_id=? AND kind='stake' AND state='confirmed'").all(id) as { user_id: string }[]).map(row => row.user_id));
-    const entrants = data.players.filter(player => confirmedIds.has(player.user_id));
+    const entrants = data.players.filter(player => player.ready && confirmedIds.has(player.user_id));
+    const orphaned = data.players.filter(player => !player.ready && confirmedIds.has(player.user_id));
     const winners = entrants.filter(player => player.prediction === data.battle.outcome);
-    const expected = data.battle.status === 'void' ? entrants.length : data.battle.outcome === 'HOUSE' ? 1 : winners.length ? winners.length + 1 : entrants.length;
+    const expected = orphaned.length + (data.battle.status === 'void' ? entrants.length : data.battle.outcome === 'HOUSE' ? 1 : winners.length ? winners.length + 1 : entrants.length);
     paymentProgress = { fundedPlayers: funded, expectedSettlementPayments: expected, confirmedSettlementPayments: settlement.confirmed, delayed: paid.settlement_status === 'pending' && !!data.battle.end_at && now - data.battle.end_at > 60_000 };
   }
   return {
@@ -144,9 +146,12 @@ async function settlePaidBattle(id: string) {
     for (const intent of confirmedIntents) repair.run(id, intent.user_id, intent.amount_minor, intent.signature, intent.updated_at);
     const confirmed = store.db.prepare("SELECT user_id FROM pay_transfers WHERE battle_id=? AND kind='stake'").all(id) as { user_id: string }[];
     const confirmedIds = new Set(confirmed.map(row => row.user_id));
-    const entrants = store.players(id).filter(player => confirmedIds.has(player.user_id));
+    const players = store.players(id);
+    const entrants = players.filter(player => player.ready && confirmedIds.has(player.user_id));
+    const orphaned = players.filter(player => !player.ready && confirmedIds.has(player.user_id));
     const winners = entrants.filter(player => player.prediction === battle.outcome);
     const distribution = paidDistribution(entrants.map(player => player.user_id), winners.map(player => player.user_id), paid.stake_minor, battle.outcome === 'HOUSE', battle.status === 'void');
+    for (const player of orphaned) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
     if (distribution.houseMinor) await payMode.house(id, distribution.houseMinor);
     for (const [userId, amountMinor] of distribution.payouts) await payMode.pay(userId, id, 'payout', amountMinor);
     for (const [userId, amountMinor] of distribution.refunds) await payMode.pay(userId, id, 'refund', amountMinor);
@@ -161,7 +166,7 @@ function scheduleDaily() {
   setTimeout(() => { store.grantDaily(); for (const id of streams.keys()) broadcast(id); scheduleDaily(); }, nextMidnight - now);
 }
 scheduleDaily();
-setInterval(() => { try { engine.tick(Date.now(), feed.fresh()); for (const id of streams.keys()) broadcast(id); } catch (error) { console.error('Battle tick:', error); } }, 1000);
+setInterval(() => { try { engine.tick(Date.now(), feed.fresh(), new Set(funding.keys())); for (const id of streams.keys()) broadcast(id); } catch (error) { console.error('Battle tick:', error); } }, 1000);
 setInterval(() => { for (const [key, value] of sessions) if (value.expires < Date.now()) sessions.delete(key); }, 60000);
 setInterval(() => {
   const rows = store.db.prepare("SELECT id FROM battles WHERE status IN ('finished','void') AND id NOT IN (SELECT battle_id FROM result_deliveries)").all() as { id: string }[];
@@ -302,12 +307,26 @@ const server = createServer(async (req, res) => {
           if (!payMode) throw new GameError('Test pay mode is disabled', 503);
           const player = store.players(id).find(item => item.user_id === actorId);
           if (!player) throw new GameError('Join the lobby first');
-          if (!player.ready) await payMode.lockStake(id, actorId, paid.stake_minor);
-          engine.readyPaid(id, actorId);
+          if (!player.ready) {
+            if (!funding.has(id)) funding.set(id, new Set());
+            funding.get(id)!.add(actorId);
+            try {
+              await payMode.lockStake(id, actorId, paid.stake_minor);
+              try { engine.readyPaid(id, actorId); }
+              catch (error) {
+                const admitted = store.players(id).some(item => item.user_id === actorId && item.ready);
+                if (!admitted) await payMode.pay(actorId, id, 'refund', paid.stake_minor);
+                throw error;
+              }
+            } finally {
+              funding.get(id)?.delete(actorId);
+              if (!funding.get(id)?.size) funding.delete(id);
+            }
+          }
         } else engine.ready(id, actorId);
         json(res, 200, view(id, actorId)); return;
       }
-      if (req.method === 'POST' && parts[3] === 'start') { engine.startNow(id, String(actor.user.id)); json(res, 200, view(id, String(actor.user.id))); return; }
+      if (req.method === 'POST' && parts[3] === 'start') { if (funding.get(id)?.size) throw new GameError('Wait for stake confirmations to finish'); engine.startNow(id, String(actor.user.id)); json(res, 200, view(id, String(actor.user.id))); return; }
       if (req.method === 'POST' && parts[3] === 'predict') {
         const data = await body(req);
         engine.predict(id, String(actor.user.id), data.side as any); json(res, 200, view(id, String(actor.user.id))); return;

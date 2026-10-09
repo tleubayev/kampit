@@ -119,8 +119,8 @@ export class Engine extends EventEmitter {
     if (!result.changes) throw new GameError('Already predicted or not ready for this battle');
     this.emit('change', battle);
   }
-  tick(now: number, quote: Quote | null) {
-    for (const battle of this.store.lobbies()) this.advanceLobby(battle, now);
+  tick(now: number, quote: Quote | null, blockedLobbies = new Set<string>()) {
+    for (const battle of this.store.lobbies()) if (!blockedLobbies.has(battle.id)) this.advanceLobby(battle, now);
     for (const battle of this.store.pending()) {
       if (battle.status === 'countdown' && battle.countdown_at! <= now) {
         if (!quote || now - quote.at > 5000) continue;

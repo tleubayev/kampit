@@ -64,6 +64,18 @@ test('paid lobby timer starts only after the second funded player', () => {
   store.close();
 });
 
+test('paid lobby does not advance while a stake confirmation is in progress', () => {
+  const { store, engine } = fixture();
+  const battle = engine.createPaid('g', 100_000, '1', 1000);
+  engine.join(battle.id, '1', 'A'); engine.join(battle.id, '2', 'B');
+  engine.readyPaid(battle.id, '1', 2000); engine.readyPaid(battle.id, '2', 3000);
+  engine.tick(33000, quote(100, 33000), new Set([battle.id]));
+  assert.equal(engine.require(battle.id).status, 'lobby');
+  engine.tick(34000, quote(100, 34000));
+  assert.equal(engine.require(battle.id).status, 'countdown');
+  store.close();
+});
+
 test('stake is fixed, reserved on ready, and winners split the full pool', () => {
   const { store, engine } = fixture();
   assert.throws(() => engine.create('g', 9, '1', 1000), GameError);
