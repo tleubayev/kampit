@@ -93,9 +93,52 @@ function render(data) {
   el('myStats').innerHTML=data.me?`<div><strong>${data.me.wins}</strong><small>WINS</small></div><div><strong>${data.me.losses}</strong><small>LOSSES</small></div><div><strong>${data.me.streak}</strong><small>STREAK</small></div><div><strong>${data.me.xp}</strong><small>NET XP</small></div>`:'<div class="empty">Play a round to record your stats.</div>';
   el('leaderboard').innerHTML=data.leaderboard.length?data.leaderboard.slice(0,5).map((p,i)=>`<div class="row"><span>${i+1}. ${safe(p.name)}</span><small>${p.xp} XP · ${p.wins}W</small></div>`).join(''):'<div class="empty">First result starts the leaderboard</div>';
 }
+async function refreshLandingMarket() {
+  const priceEl = el('previewPrice'), changeEl = el('previewChange');
+  const chart = document.querySelector('.previewMarket svg');
+  if (!priceEl || !changeEl || !chart) return;
+  const line = chart.querySelector('.chartLine'), fill = chart.querySelector('.chartFill');
+  try {
+    const response = await fetch('/api/market', { cache: 'no-store' });
+    if (!response.ok) throw new Error('Market feed unavailable');
+    const data = await response.json();
+    const quote = data.quote;
+    if (!Number.isFinite(quote?.price) || Date.now() - quote.at > 5000) throw new Error('Market feed paused');
+    priceEl.textContent = money(quote.price);
+    const points = (Array.isArray(data.chart) ? data.chart : [])
+      .filter(point => Number.isFinite(point.price) && Number.isFinite(point.at) && point.at >= Date.now() - 120000);
+    if (points.length < 2) {
+      changeEl.textContent = 'Collecting live prices…';
+      line.setAttribute('d', '');
+      fill.setAttribute('d', '');
+      return;
+    }
+    const first = points[0], last = points.at(-1);
+    const change = (last.price / first.price - 1) * 100;
+    changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)}% over the last ${Math.max(1, Math.round((last.at - first.at) / 1000))} sec`;
+    changeEl.style.color = change >= 0 ? '#72e8b2' : '#ff758b';
+    line.style.stroke = change >= 0 ? '#72e8c2' : '#ff758b';
+    const prices = points.map(point => point.price);
+    const low = Math.min(...prices), high = Math.max(...prices), range = Math.max(high - low, high * .0002);
+    const startAt = first.at, timeSpan = Math.max(last.at - startAt, 1);
+    const coords = points.map(point => [
+      ((point.at - startAt) / timeSpan * 360).toFixed(1),
+      (90 - (point.price - low) / range * 80).toFixed(1)
+    ]);
+    const path = coords.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' ');
+    line.setAttribute('d', path);
+    fill.setAttribute('d', `${path} L360 100 L0 100 Z`);
+  } catch {
+    priceEl.textContent = '—';
+    changeEl.textContent = 'Live price paused';
+    changeEl.style.color = '';
+    line.setAttribute('d', '');
+    fill.setAttribute('d', '');
+  }
+}
 async function boot(){
   tg?.ready();tg?.expand();
-  if(!tg?.initData){document.body.classList.add('marketing');return;}
+  if(!tg?.initData){document.body.classList.add('marketing');void refreshLandingMarket();setInterval(refreshLandingMarket,2000);return;}
   try {
     const session=await api('/api/session','POST',{initData:tg.initData});
     showAccount(await api('/api/me'));
