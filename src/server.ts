@@ -201,6 +201,10 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', appUrl);
     const path = url.pathname;
     if (req.method === 'GET' && path === '/health') { json(res, 200, { ok: true, priceFresh: !!feed.fresh() }); return; }
+    if (req.method === 'GET' && path === '/api/market') {
+      res.setHeader('cache-control', 'no-store');
+      json(res, 200, { quote: feed.fresh(), chart: feed.history }); return;
+    }
     if (req.method === 'GET' && path === '/admin') {
       if (!requireAdmin(req, res)) return;
       const content = await readFile(resolve(publicDir, 'admin.html'));
