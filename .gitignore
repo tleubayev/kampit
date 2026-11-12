@@ -1,5 +1,6 @@
 .env
 .pay-devnet.env
+.pay-ton-testnet.env
 *.sqlite
 *.sqlite-*
 .DS_Store

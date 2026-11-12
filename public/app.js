@@ -4,8 +4,8 @@ const money = value => Number.isFinite(value) ? `$${Number(value).toFixed(2)}` :
 const direction = value => value === 'LONG' ? 'UP' : value === 'SHORT' ? 'DOWN' : value;
 const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 let battleId, state, stream, accountInfo, requestBusy = false, serverOffset = 0, lastServerNow = 0;
-let readyPaymentBusy = false, faucetClaimBusy = false, faucetRefreshTimer, transactionsExpanded = false, transactionsShowAll = false;
-let payInfo;
+let readyPaymentBusy = false, transactionsExpanded = false, transactionsShowAll = false;
+let payInfo, tonConnectUi, tonWallet;
 const startParam = tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('tgWebAppStartParam');
 const windowBattle = new URLSearchParams(location.search).get('battle');
 function drawChart(points, startPrice) {
@@ -23,33 +23,48 @@ function drawChart(points, startPrice) {
 }
 async function api(path, method='GET', data) {
   const res=await fetch(path,{method,credentials:'same-origin',headers:{'content-type':'application/json'},body:data?JSON.stringify(data):undefined});
-  const json=await res.json();if(!res.ok)throw new Error(json.error||'Request failed');return json;
+  const json=await res.json();if(!res.ok){const error=new Error(json.error||'Request failed');error.status=res.status;throw error;}return json;
 }
 async function openBattle(id, updateAddress=false) {
   if(!/^[a-f0-9]{16}$/.test(id))throw new Error('Open a battle link from your Telegram group.');
   stream?.close();stream=undefined;state=undefined;lastServerNow=0;battleId=id;transactionsExpanded=false;transactionsShowAll=false;
   if(updateAddress){const url=new URL(location.href);url.searchParams.set('battle',id);history.replaceState({},'',url);}
   const initial=await api(`/api/battles/${battleId}`); render(initial);
-  if(initial.battle.mode==='USDC_TEST'){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};render(initial);if(!payInfo.faucet?.claimed&&['pending','signed'].includes(payInfo.faucet?.state))schedulePayRefresh();}
+  if(initial.battle.mode==='GRAM_TEST'){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};render(initial);}
   stream=new EventSource(`/api/battles/${battleId}/events`);
   stream.onmessage=event=>render(JSON.parse(event.data));
   stream.onerror=()=>{el('feedTime').textContent='RECONNECTING';};
 }
 async function action(name,data) {
-  if(requestBusy)return;requestBusy=true;if(name==='ready'&&state?.battle?.mode==='USDC_TEST'){readyPaymentBusy=true;render(state);}
-  try { const result=await api(`/api/battles/${battleId}/${name}`,'POST',data); if(name==='rematch') await openBattle(result.id,true); else { if(result.battle?.mode==='USDC_TEST'&&name==='ready'){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};} render(result); } }
+  if(requestBusy)return;requestBusy=true;
+  try { const result=await api(`/api/battles/${battleId}/${name}`,'POST',data); if(name==='rematch') await openBattle(result.id,true); else render(result); }
   catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);} finally {requestBusy=false;readyPaymentBusy=false;if(state)render(state);}
 }
 window.doAction=action;
-async function refreshPay(){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};if(state)render(state);return !!payInfo.faucet?.claimed;}
-function schedulePayRefresh(attempts=40){clearTimeout(faucetRefreshTimer);const check=async()=>{if(!state||state.battle.mode!=='USDC_TEST')return;let claimed=false;try{claimed=await refreshPay();}catch{}if(!claimed&&attempts-->0)faucetRefreshTimer=setTimeout(check,3000);};faucetRefreshTimer=setTimeout(check,1500);}
-window.claimTestUsdc=async()=>{if(requestBusy)return;requestBusy=true;faucetClaimBusy=true;payInfo={...payInfo,faucet:{...payInfo?.faucet,state:'pending'}};if(state)render(state);schedulePayRefresh();try{const result=await api('/api/pay/faucet','POST');payInfo={...payInfo,balanceMinor:result.balanceMinor,faucet:{amountMinor:result.amountMinor,claimed:result.claimed,state:result.state,signature:result.signature,claimedAt:result.claimedAt},transactions:result.transactions};if(state)render(state);const message=result.claimed?'1 test USDC is now in your Kampit wallet.':'Claim is being processed.';if(tg?.showAlert)tg.showAlert(message);else alert(message);}catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);}finally{requestBusy=false;faucetClaimBusy=false;if(state)render(state);}};
-window.submitWithdrawal=async()=>{const recipient=el('withdrawAddress')?.value.trim(),amount=Number(el('withdrawAmount')?.value);if(!recipient||!Number.isFinite(amount))return;try{const result=await api('/api/pay/withdrawals','POST',{requestId:crypto.randomUUID().replaceAll('-',''),recipient,amountMinor:Math.round(amount*1e6)});payInfo={...payInfo,balanceMinor:result.balanceMinor,transactions:result.transactions};if(state)render(state);if(result.status==='approval_required'){const message='Withdrawal submitted for admin approval.';if(tg?.showAlert)tg.showAlert(message);else alert(message);}}catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);}};
+async function refreshPay(){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};if(state)render(state);}
+function connectedAddress(){return tonWallet&&window.TON_CONNECT_UI?.toUserFriendlyAddress(tonWallet.account.address,true);}
+window.connectTon=()=>tonConnectUi?.openModal();
+window.disconnectTon=()=>tonConnectUi?.disconnect();
+window.fundAndReady=async()=>{
+  if(requestBusy)return;
+  if(!tonWallet){await tonConnectUi?.openModal();return;}
+  if(tonWallet.account.chain!=='-3'){const message='Connect a TON Testnet wallet.';if(tg?.showAlert)tg.showAlert(message);else alert(message);return;}
+  requestBusy=true;readyPaymentBusy=true;if(state)render(state);
+  try{
+    const intent=await api(`/api/battles/${battleId}/stake`,'POST',{walletAddress:connectedAddress()});
+    if(!intent.confirmed)await tonConnectUi.sendTransaction({validUntil:intent.validUntil,network:intent.network,messages:[{address:intent.address,amount:intent.amountNano,payload:intent.payload}]});
+    let result;
+    for(let attempt=0;attempt<20;attempt++){try{result=await api(`/api/battles/${battleId}/ready`,'POST');break;}catch(error){if(error.status!==409)throw error;await new Promise(resolve=>setTimeout(resolve,1000));}}
+    if(!result)throw new Error('The GRAM transfer is still confirming. Tap ready again shortly.');
+    await refreshPay();render(result);
+  }catch(error){if(tg?.showAlert)tg.showAlert(error.message);else alert(error.message);}
+  finally{requestBusy=false;readyPaymentBusy=false;if(state)render(state);}
+};
 window.toggleTransactions=()=>{transactionsExpanded=!transactionsExpanded;if(!transactionsExpanded)transactionsShowAll=false;if(state)render(state);};
 window.showAllTransactions=()=>{transactionsShowAll=true;if(state)render(state);};
-function transactionRow(tx){return `<div class="txRow"><span>${tx.id?.startsWith('faucet:')?'WELCOME CLAIM':safe(tx.kind).toUpperCase()} · ${(tx.amountMinor/1e6).toFixed(2)}</span><a class="${tx.state==='confirmed'?'green':tx.state==='failed'?'red':'purple'}" ${tx.explorerUrl?`href="${safe(tx.explorerUrl)}" target="_blank"`:''}>${safe(tx.state).toUpperCase()}</a></div>`;}
+function transactionRow(tx){return `<div class="txRow"><span>${safe(tx.kind).toUpperCase()} · ${(tx.amountNano/1e9).toFixed(3)} GRAM</span><a class="${tx.state==='confirmed'?'green':tx.state==='failed'?'red':'purple'}" ${tx.explorerUrl?`href="${safe(tx.explorerUrl)}" target="_blank"`:''}>${safe(tx.state).toUpperCase()}</a></div>`;}
 function transactionHistory(items){const pending=items.find(tx=>tx.state==='pending'||tx.state==='signed');if(!transactionsExpanded)return `<div class="txList"><button class="txToggle" onclick="toggleTransactions()"><span>TRANSACTIONS · ${items.length}</span><b>⌄</b></button>${pending?transactionRow(pending):''}</div>`;const shown=transactionsShowAll?items:items.slice(0,5);return `<div class="txList"><button class="txToggle" onclick="toggleTransactions()"><span>TRANSACTIONS · ${items.length}</span><b>⌃</b></button>${shown.length?shown.map(transactionRow).join(''):'<div class="small">No transactions yet.</div>'}${!transactionsShowAll&&items.length>5?'<button class="txMore" onclick="showAllTransactions()">SHOW ALL</button>':''}</div>`;}
-function payTools(){if(!payInfo)return'';const transactions=payInfo.transactions||[],faucet=payInfo.faucet,claiming=faucetClaimBusy||faucet?.state==='pending'||faucet?.state==='signed';const claim=faucet&&!faucet.claimed?`<button class="primary faucetClaim" onclick="claimTestUsdc()" ${claiming?'disabled':''}>${claiming?'CLAIMING 1 TEST USDC…':'CLAIM 1 TEST USDC'}</button>${claiming?'<div class="small purple">Creating and funding your wallet. Balance updates automatically.</div>':''}`:`<div class="small green">✓ 1 test USDC welcome claim used</div>`;return `<div class="payTools"><div class="payTitle"><b>TEST USDC WALLET</b><span>${(payInfo.balanceMinor/1e6).toFixed(2)} USDC</span></div>${claim}<div class="small">Official Circle Devnet USDC · one welcome claim per Telegram account · no monetary value</div><div class="walletAddress">${safe(payInfo.walletAddress)}</div><div class="withdrawGrid"><input id="withdrawAddress" autocomplete="off" placeholder="Solana withdrawal address"><input id="withdrawAmount" inputmode="decimal" placeholder="USDC amount"><button class="secondary" onclick="submitWithdrawal()">WITHDRAW</button></div><div class="small">Limits: 0.10–20 USDC per withdrawal · 100 USDC per 24 hours</div>${transactionHistory(transactions)}</div>`;}
+function payTools(){if(!payInfo)return'';const transactions=payInfo.transactions||[],address=connectedAddress();return `<div class="payTools"><div class="payTitle"><b>TON CONNECT</b><span>TESTNET GRAM</span></div>${address?`<div class="walletAddress">${safe(address)}</div><button class="secondary" onclick="disconnectTon()">DISCONNECT</button>`:'<button class="primary" onclick="connectTon()">CONNECT TON WALLET</button>'}<div class="small">Your wallet stays self-custodial. Every stake is matched to this battle by a unique on-chain payment ID.</div>${transactionHistory(transactions)}</div>`;}
 function showAccount(info) {
   accountInfo=info;
   el('balance').textContent=`${info.account.balance} XP`;
@@ -63,8 +78,8 @@ window.shareInvite=()=>{
 };
 function render(data) {
   if(data.serverNow !== lastServerNow){serverOffset=data.serverNow-Date.now();lastServerNow=data.serverNow;}state=data; const b=data.battle, now=Date.now()+serverOffset, remaining= b.status==='lobby'&&b.lobby_deadline?Math.max(0,b.lobby_deadline-now):b.status==='countdown'?Math.max(0,b.countdown_at-now):b.status==='live'?Math.max(0,b.end_at-now):0;
-  const paid=b.mode==='USDC_TEST', stakeLabel=paid?`${(b.stakeMinor/1e6).toFixed(2)} TEST USDC`:`${b.stake} XP`;
-  el('balance').textContent=paid&&payInfo?`${(payInfo.balanceMinor/1e6).toFixed(2)} tUSDC`:`${data.account.balance} XP`;
+  const paid=b.mode==='GRAM_TEST', stakeLabel=paid?`${(b.stakeMinor/1e9).toFixed(2)} TEST GRAM`:`${b.stake} XP`;
+  el('balance').textContent=paid?'TEST GRAM':`${data.account.balance} XP`;
   el('price').textContent=money(data.quote?.price || b.end_price || b.start_price);el('startPrice').textContent=money(b.start_price);
   const change=b.start_price&&data.quote ? (data.quote.price/b.start_price-1)*100 : null;
   el('delta').textContent=change===null?'Waiting for market data':`${change>=0?'+':''}${change.toFixed(3)}% from round start`;
@@ -76,17 +91,17 @@ function render(data) {
   let html='';
   if(b.status==='lobby') {
     const readyCount=data.players.filter(p=>p.ready).length, creator=b.isCreator;
-    const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?`<button class="primary" onclick="doAction('ready')" ${readyPaymentBusy?'disabled':''}>${readyPaymentBusy?'CONFIRMING STAKE…':'I’M READY'}</button>`:'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
+    const action=!mine?'<button class="primary" onclick="doAction(\'join\')">JOIN BATTLE</button>':!mine.ready?`<button class="primary" onclick="${paid?'fundAndReady()':"doAction('ready')"}" ${readyPaymentBusy?'disabled':''}>${readyPaymentBusy?'CONFIRMING STAKE…':'I’M READY'}</button>`:'<button class="secondary" disabled>READY · WAITING FOR PLAYERS</button>';
     const start=creator&&readyCount>=2?'<button class="primary" onclick="doAction(\'start\')">START NOW</button>':'';
     const pool=readyCount*(b.stakeMinor||0),fee=Math.floor(pool*.01),prize=pool-fee;
-    const terms=paid?`<div class="paymentSummary"><span>FUNDED PLAYERS <b>${data.paymentProgress?.fundedPlayers||0}/${b.maxPlayers}</b></span><span>POOL <b>${(pool/1e6).toFixed(2)} USDC</b></span><span>1% FEE <b>${(fee/1e6).toFixed(3)} USDC</b></span><span>WINNER POOL <b>${(prize/1e6).toFixed(3)} USDC</b></span></div>`:'';
-    html=`<h1>${paid?'Devnet pay battle':'Join the battle'}</h1><p>${paid?'Test tokens have no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins ${paid?'after two stakes confirm':'after the first player is ready'}. Unfunded players are excluded. ${readyCount} ready.</p>${terms}${action}${start}${paid?payTools():''}`;
+    const terms=paid?`<div class="paymentSummary"><span>FUNDED PLAYERS <b>${data.paymentProgress?.fundedPlayers||0}/${b.maxPlayers}</b></span><span>POOL <b>${(pool/1e9).toFixed(3)} GRAM</b></span><span>1% FEE <b>${(fee/1e9).toFixed(4)} GRAM</b></span><span>WINNER POOL <b>${(prize/1e9).toFixed(4)} GRAM</b></span></div>`:'';
+    html=`<h1>${paid?'TON Testnet battle':'Join the battle'}</h1><p>${paid?'Testnet GRAM has no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins ${paid?'after two stakes confirm':'after the first player is ready'}. Unfunded players are excluded. ${readyCount} ready.</p>${terms}${action}${start}${paid?payTools():''}`;
   }
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {
     const locked=now>=b.lock_at;
     html=`<h1>${locked?'Picks are locked': 'Where will BTC finish?'}</h1><p>${mine?.prediction?`Your pick: ${direction(mine.prediction)}`:locked?'Watch the price until the finish.':'Choose in the first 10 seconds.'} · ${stakeLabel} stake</p><div class="choiceGrid"><button class="choice long ${mine?.prediction==='LONG'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'LONG'})"><b>↑</b>UP</button><button class="choice short ${mine?.prediction==='SHORT'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'SHORT'})"><b>↓</b>DOWN</button></div><div class="small">${locked?'Prediction window closed':`Picks lock in ${Math.max(0,Math.ceil((b.lock_at-now)/1000))}s`}</div>`;
-  } else {const progress=data.paymentProgress,settlement=paid?(b.settlementStatus==='settled'?'Settlement complete.':`Settlement: ${progress?.confirmedSettlementPayments||0}/${progress?.expectedSettlementPayments||0} payments confirmed.${progress?.delayed?' Taking longer than expected; recovery remains active.':''}`):'';html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${direction(b.outcome)} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${direction(mine.prediction)}`:'No pick'}. ${b.outcome==='HOUSE'?'The test house keeps the entire pool.':b.outcome==='TIE'?'All stakes refunded.':`Winners split the ${paid?'test-USDC pool after a 1% house fee':'XP pool'}.`}`} ${settlement}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${stakeLabel}</button>`;}
+  } else {const progress=data.paymentProgress,settlement=paid?(b.settlementStatus==='settled'?'Settlement complete.':`Settlement: ${progress?.confirmedSettlementPayments||0}/${progress?.expectedSettlementPayments||0} payments confirmed.${progress?.delayed?' Taking longer than expected; recovery remains active.':''}`):'';html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${direction(b.outcome)} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${direction(mine.prediction)}`:'No pick'}. ${b.outcome==='HOUSE'?'The test house keeps the entire pool.':b.outcome==='TIE'?'All stakes refunded.':`Winners split the ${paid?'test-GRAM pool after a 1% house fee':'XP pool'}.`}`} ${settlement}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${stakeLabel}</button>`;}
   el('content').innerHTML=html;
   el('playerCount').textContent=paid?`${data.players.length}/${b.maxPlayers} joined · ${data.paymentProgress?.fundedPlayers||0} funded`:`${data.players.length} / ${b.maxPlayers} joined`;
   el('players').innerHTML=data.players.length?data.players.map(p=>`<div class="row"><span>${safe(p.name)} ${p.isYou?'· YOU':''}</span><small class="${p.prediction==='LONG'?'green':p.prediction==='SHORT'?'red':''}">${direction(p.prediction)|| (p.ready?'READY':'JOINED')}</small></div>`).join(''):'<div class="empty">Waiting for players</div>';
@@ -136,10 +151,17 @@ async function refreshLandingMarket() {
     fill.setAttribute('d', '');
   }
 }
+function setupTonConnect(){
+  if(!window.TON_CONNECT_UI)return;
+  tonConnectUi=new window.TON_CONNECT_UI.TonConnectUI({manifestUrl:`${location.origin}/tonconnect-manifest.json`});
+  tonConnectUi.uiOptions={language:'en',uiPreferences:{theme:window.TON_CONNECT_UI.THEME.DARK}};
+  tonConnectUi.onStatusChange(wallet=>{tonWallet=wallet;if(state)render(state);});
+}
 async function boot(){
   tg?.ready();tg?.expand();
   if(!tg?.initData){document.body.classList.add('marketing');void refreshLandingMarket();setInterval(refreshLandingMarket,2000);return;}
   try {
+    setupTonConnect();
     const session=await api('/api/session','POST',{initData:tg.initData});
     showAccount(await api('/api/me'));
     setInterval(async()=>{try{showAccount(await api('/api/me'));}catch{}},30000);

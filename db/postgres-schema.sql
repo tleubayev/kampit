@@ -38,8 +38,9 @@ CREATE TABLE IF NOT EXISTS pay_wallets (
 );
 CREATE TABLE IF NOT EXISTS paid_battles (
   battle_id text PRIMARY KEY REFERENCES battles(id), stake_minor bigint NOT NULL CHECK(stake_minor >= 100000),
-  settlement_status text NOT NULL DEFAULT 'pending'
+  settlement_status text NOT NULL DEFAULT 'pending', asset text NOT NULL DEFAULT 'legacy_usdc'
 );
+ALTER TABLE paid_battles ADD COLUMN IF NOT EXISTS asset text NOT NULL DEFAULT 'legacy_usdc';
 CREATE TABLE IF NOT EXISTS pay_faucets (
   user_id text PRIMARY KEY, amount_minor bigint NOT NULL, signature text NOT NULL UNIQUE,
   created_at bigint NOT NULL

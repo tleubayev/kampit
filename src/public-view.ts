@@ -16,7 +16,7 @@ export function publicBattle(battle: Battle, userId: string, paid?: { stake_mino
     end_price: battle.end_price,
     outcome: battle.outcome,
     stake: battle.stake,
-    mode: paid ? 'USDC_TEST' : 'XP',
+    mode: paid?.asset === 'gram' ? 'GRAM_TEST' : paid ? 'LEGACY_PAID' : 'XP',
     maxPlayers: paid ? 10 : 100,
     stakeMinor: paid?.stake_minor,
     settlementStatus: paid?.settlement_status,

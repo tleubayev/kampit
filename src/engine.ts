@@ -5,7 +5,7 @@ import type { Quote } from './price.ts';
 
 export const MAX_PLAYERS = 100;
 export const MAX_PAID_PLAYERS = 10;
-export const MAX_PAID_STAKE_MINOR = 20_000_000;
+export const MAX_PAID_STAKE_MINOR = 20_000_000_000;
 export const LOBBY_READY_MS = 30_000;
 export const LOBBY_MAX_MS = 5 * 60_000;
 const COUNTDOWN_MS = 3_000;
@@ -28,13 +28,13 @@ export class Engine extends EventEmitter {
     return battle;
   }
   createPaid(chatId: string, stakeMinor: number, creatorUserId: string, now = Date.now()): Battle {
-    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000 || stakeMinor > MAX_PAID_STAKE_MINOR || !Number.isSafeInteger(stakeMinor * MAX_PAID_PLAYERS)) throw new GameError('Test stake must be between 0.10 and 20.00 USDC');
+    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000_000 || stakeMinor > MAX_PAID_STAKE_MINOR || !Number.isSafeInteger(stakeMinor * MAX_PAID_PLAYERS)) throw new GameError('Test stake must be between 0.10 and 20.00 GRAM');
     const existing = this.store.active(chatId); if (existing) return existing;
     const id = randomBytes(8).toString('hex');
     this.store.db.exec('BEGIN IMMEDIATE');
     try {
       this.store.db.prepare('INSERT INTO battles(id,chat_id,status,created_at,stake,creator_user_id) VALUES(?,?,?,?,0,?)').run(id, chatId, 'lobby', now, creatorUserId);
-      this.store.db.prepare('INSERT INTO paid_battles(battle_id,stake_minor) VALUES(?,?)').run(id, stakeMinor);
+      this.store.db.prepare("INSERT INTO paid_battles(battle_id,stake_minor,asset) VALUES(?,?,'gram')").run(id, stakeMinor);
       this.store.db.exec('COMMIT');
     } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
     const battle = this.require(id); this.emit('change', battle); return battle;
@@ -45,6 +45,7 @@ export class Engine extends EventEmitter {
     if (!this.store.players(id).some(p => p.user_id === userId)) throw new GameError('Only a player can start a rematch', 403);
     if (battle.successor_id) return this.require(battle.successor_id);
     const paid = this.store.paidBattle(id);
+    if (paid && paid.asset !== 'gram') throw new GameError('Start a new GRAM battle from the group chat');
     const next = paid ? this.createPaid(battle.chat_id, paid.stake_minor, userId, now) : this.create(battle.chat_id, battle.stake || 10, userId, now, id);
     this.store.db.prepare('UPDATE battles SET successor_id=? WHERE id=?').run(next.id, id);
     return next;
@@ -92,7 +93,7 @@ export class Engine extends EventEmitter {
   }
   readyPaid(id: string, userId: string, now = Date.now()) {
     const battle = this.require(id);
-    if (!this.store.paidBattle(id)) throw new GameError('This is not a USDC test battle');
+    if (this.store.paidBattle(id)?.asset !== 'gram') throw new GameError('This is not a GRAM test battle');
     const player = this.store.db.prepare('SELECT ready FROM players WHERE battle_id=? AND user_id=?').get(id, userId) as { ready: number } | undefined;
     if (!player) throw new GameError('Join the lobby first');
     if (player.ready) return;

@@ -27,7 +27,7 @@ test('battle accepts 100 players and rejects the 101st', () => {
 });
 
 test('paid battle accepts 10 players and rejects the 11th', () => {
-  const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000, '1');
+  const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000_000, '1');
   for (let i = 1; i <= MAX_PAID_PLAYERS; i++) engine.join(battle.id, String(i), `Player ${i}`);
   assert.equal(store.players(battle.id).length, 10);
   assert.throws(() => engine.join(battle.id, '11', 'Player 11'), /full \(10 players\)/);
@@ -35,7 +35,7 @@ test('paid battle accepts 10 players and rejects the 11th', () => {
 });
 
 test('ten-player paid round advances with all funded players', () => {
-  const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000, '1', 1000);
+  const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000_000, '1', 1000);
   for (let i = 1; i <= MAX_PAID_PLAYERS; i++) { engine.join(battle.id, String(i), `Player ${i}`); engine.readyPaid(battle.id, String(i), 1000 + i); }
   assert.equal(store.players(battle.id).filter(player => player.ready).length, 10);
   engine.startNow(battle.id, '1', 2000); engine.tick(5000, quote(100, 5000));
@@ -47,7 +47,7 @@ test('ten-player paid round advances with all funded players', () => {
 
 test('paid lobby timer starts only after the second funded player', () => {
   const { store, engine } = fixture();
-  const battle = engine.createPaid('g', 100_000, '1', 1000);
+  const battle = engine.createPaid('g', 100_000_000, '1', 1000);
   engine.join(battle.id, '1', 'A'); engine.join(battle.id, '2', 'B');
   engine.readyPaid(battle.id, '1', 2000);
   assert.equal(engine.require(battle.id).lobby_deadline, null);
@@ -55,7 +55,7 @@ test('paid lobby timer starts only after the second funded player', () => {
   assert.equal(engine.require(battle.id).lobby_deadline, 35000);
   engine.tick(35000, quote(100, 35000));
   assert.equal(engine.require(battle.id).status, 'countdown');
-  const waiting = engine.createPaid('g2', 100_000, '3', 1000);
+  const waiting = engine.createPaid('g2', 100_000_000, '3', 1000);
   engine.join(waiting.id, '3', 'C'); engine.readyPaid(waiting.id, '3', 2000);
   engine.tick(300_999, null);
   assert.equal(engine.require(waiting.id).status, 'lobby');
@@ -66,7 +66,7 @@ test('paid lobby timer starts only after the second funded player', () => {
 
 test('paid lobby does not advance while a stake confirmation is in progress', () => {
   const { store, engine } = fixture();
-  const battle = engine.createPaid('g', 100_000, '1', 1000);
+  const battle = engine.createPaid('g', 100_000_000, '1', 1000);
   engine.join(battle.id, '1', 'A'); engine.join(battle.id, '2', 'B');
   engine.readyPaid(battle.id, '1', 2000); engine.readyPaid(battle.id, '2', 3000);
   engine.tick(33000, quote(100, 33000), new Set([battle.id]));
