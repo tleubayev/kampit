@@ -33,7 +33,7 @@ export class Bot {
   async setup(appUrl: string, secret: string) {
     await this.call('setWebhook', { url: `${appUrl.replace(/\/$/, '')}/telegram/webhook`, secret_token: secret, allowed_updates: ['message', 'callback_query'], drop_pending_updates: false });
     await this.call('setMyCommands', { commands: [
-      { command: 'battle', description: 'Start a SOL quick battle' },
+      { command: 'battle', description: 'Start a BTC quick battle' },
       { command: 'leaderboard', description: 'Group XP leaderboard' },
       { command: 'stats', description: 'Your group stats' },
       { command: 'referral', description: 'Get your invite link' },
@@ -47,7 +47,7 @@ export class Bot {
     const stakeLabel = paid ? `${(paid.stake_minor / 1_000_000).toFixed(2)} TEST USDC` : `${battle.stake} XP`;
     const sent = await this.call('sendMessage', {
       chat_id: battle.chat_id,
-      text: `⚔️ SOL QUICK BATTLE · ${stakeLabel} STAKE${paid ? '\n🧪 SOLANA DEVNET · TOKENS HAVE NO VALUE' : ''}\n\nReady up to lock ${stakeLabel}. The lobby runs for 30 seconds after ${paid ? 'two stakes confirm' : 'the first player readies up'}; unready players are excluded. Predict SOL/USD over 60 seconds. 2–${paid ? 10 : 100} players.`,
+      text: `⚔️ BTC QUICK BATTLE · ${stakeLabel} STAKE${paid ? '\n🧪 SOLANA DEVNET · TOKENS HAVE NO VALUE' : ''}\n\nReady up to lock ${stakeLabel}. The lobby runs for 30 seconds after ${paid ? 'two stakes confirm' : 'the first player readies up'}; unready players are excluded. Predict BTC/USD over 60 seconds. 2–${paid ? 10 : 100} players.`,
       reply_markup: { inline_keyboard: [[{ text: '⚔️ JOIN BATTLE', url: this.link(battle.id) }]] }
     });
     this.engine.store.db.prepare('UPDATE battles SET message_id=? WHERE id=?').run(sent.message_id, battle.id);
@@ -59,8 +59,8 @@ export class Bot {
     const pool = players.filter(p => p.ready).length * (paid?.stake_minor || battle.stake);
     const poolLabel = paid ? `${(pool / 1_000_000).toFixed(2)} test USDC` : `${pool} XP`;
     const text = battle.status === 'void'
-      ? `⚠️ SOL QUICK BATTLE VOID\nAll staked ${paid ? 'test USDC' : 'XP'} was refunded.`
-      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${direction(battle.outcome)} WINS`}\n\nSOL/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${poolLabel} retained by the test house.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `${paid ? 'Winners split the pool after the 1% house fee' : `Winners split ${poolLabel}`}: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
+      ? `⚠️ BTC QUICK BATTLE VOID\nAll staked ${paid ? 'test USDC' : 'XP'} was refunded.`
+      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${direction(battle.outcome)} WINS`}\n\nBTC/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${poolLabel} retained by the test house.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `${paid ? 'Winners split the pool after the 1% house fee' : `Winners split ${poolLabel}`}: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
     await this.call('sendMessage', { chat_id: battle.chat_id, text,
       reply_markup: { inline_keyboard: [[{ text: 'VIEW RESULT / REMATCH', url: this.link(battle.id) }]] } });
   }

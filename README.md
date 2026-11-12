@@ -1,11 +1,11 @@
-# Kampit — SOL Quick Battles in Telegram
+# Kampit — BTC Quick Battles in Telegram
 
 [![Solana](https://img.shields.io/badge/Solana-devnet-9945FF)](https://solana.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Node.js%2024-3178C6)](https://www.typescriptlang.org/)
 [![Telegram](https://img.shields.io/badge/Telegram-Mini%20App-26A5E4)](https://t.me/Kampit_robot)
-[![Tests](https://img.shields.io/badge/tests-38%20passing-76f1b0)](#testing)
+[![Tests](https://img.shields.io/badge/tests-40%20passing-76f1b0)](#testing)
 
-> Challenge a Telegram group to a synchronized 60-second SOL/USD battle. Pick **UP** or **DOWN**, follow the live market, and settle the result without leaving the chat.
+> Challenge a Telegram group to a synchronized 60-second BTC/USD battle. Pick **UP** or **DOWN**, follow the live market, and settle the result without leaving the chat.
 
 [Live App](https://kampit.up.railway.app) · [Play in Telegram](https://t.me/Kampit_robot) · [Architecture](#architecture) · [Quick Start](#quick-start)
 
@@ -48,7 +48,7 @@
 | Free XP | 2–100 | Minimum 10 XP | Internal XP ledger |
 | Devnet USDC | 2–10 funded players | Minimum 0.10 test USDC | Solana Devnet |
 
-Both modes use the same live SOL/USD feed and game flow:
+Both modes use the same live BTC/USD feed and game flow:
 
 1. Create a battle in a Telegram group.
 2. Join and ready up.
@@ -83,7 +83,7 @@ Test USDC on Devnet has no monetary value.
 ## Summary of Features
 
 - Telegram group bot and Mini App
-- Server-authoritative 60-second SOL/USD rounds
+- Server-authoritative 60-second BTC/USD rounds
 - Ten-second prediction window
 - UP and DOWN predictions
 - Live chart and synchronized countdown
@@ -114,7 +114,7 @@ Test USDC on Devnet has no monetary value.
 | Frontend | HTML · CSS · browser JavaScript · Canvas |
 | Backend | Node.js 24 · TypeScript · Server-Sent Events |
 | Database | PostgreSQL |
-| Market data | Coinbase Exchange SOL/USD feed |
+| Market data | Coinbase Exchange BTC/USD feed |
 | Blockchain | Solana Devnet · `@solana/web3.js` · SPL Token |
 | Wallets | Privy server-managed Solana wallets |
 | Stablecoin | Circle Devnet USDC |

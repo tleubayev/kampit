@@ -12,8 +12,8 @@ export class CoinbasePriceFeed {
     }
     this.busy = true;
     try {
-      const response = await fetch('https://api.exchange.coinbase.com/products/SOL-USD/ticker', {
-        headers: { 'User-Agent': 'SOLQuickBattle/0.1', Accept: 'application/json' },
+      const response = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', {
+        headers: { 'User-Agent': 'Kampit/0.1', Accept: 'application/json' },
         signal: AbortSignal.timeout(4000)
       });
       if (!response.ok) throw new Error(`Price API ${response.status}`);

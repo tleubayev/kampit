@@ -58,7 +58,7 @@ function showAccount(info) {
 }
 window.shareInvite=()=>{
   if(!accountInfo)return;
-  const url=`https://t.me/share/url?url=${encodeURIComponent(accountInfo.referralLink)}&text=${encodeURIComponent('Join me for SOL Quick Battle!')}`;
+  const url=`https://t.me/share/url?url=${encodeURIComponent(accountInfo.referralLink)}&text=${encodeURIComponent('Join me for BTC Quick Battle!')}`;
   if(tg?.openTelegramLink)tg.openTelegramLink(url);else window.open(url,'_blank');
 };
 function render(data) {
@@ -85,7 +85,7 @@ function render(data) {
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {
     const locked=now>=b.lock_at;
-    html=`<h1>${locked?'Picks are locked': 'Where will SOL finish?'}</h1><p>${mine?.prediction?`Your pick: ${direction(mine.prediction)}`:locked?'Watch the price until the finish.':'Choose in the first 10 seconds.'} · ${stakeLabel} stake</p><div class="choiceGrid"><button class="choice long ${mine?.prediction==='LONG'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'LONG'})"><b>↑</b>UP</button><button class="choice short ${mine?.prediction==='SHORT'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'SHORT'})"><b>↓</b>DOWN</button></div><div class="small">${locked?'Prediction window closed':`Picks lock in ${Math.max(0,Math.ceil((b.lock_at-now)/1000))}s`}</div>`;
+    html=`<h1>${locked?'Picks are locked': 'Where will BTC finish?'}</h1><p>${mine?.prediction?`Your pick: ${direction(mine.prediction)}`:locked?'Watch the price until the finish.':'Choose in the first 10 seconds.'} · ${stakeLabel} stake</p><div class="choiceGrid"><button class="choice long ${mine?.prediction==='LONG'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'LONG'})"><b>↑</b>UP</button><button class="choice short ${mine?.prediction==='SHORT'?'selected':''}" ${locked||mine?.prediction||!mine?'disabled':''} onclick="doAction('predict',{side:'SHORT'})"><b>↓</b>DOWN</button></div><div class="small">${locked?'Prediction window closed':`Picks lock in ${Math.max(0,Math.ceil((b.lock_at-now)/1000))}s`}</div>`;
   } else {const progress=data.paymentProgress,settlement=paid?(b.settlementStatus==='settled'?'Settlement complete.':`Settlement: ${progress?.confirmedSettlementPayments||0}/${progress?.expectedSettlementPayments||0} payments confirmed.${progress?.delayed?' Taking longer than expected; recovery remains active.':''}`):'';html=`<h1 class="result ${b.outcome?.toLowerCase()||''}">${b.status==='void'?'ROUND VOID':b.outcome==='TIE'?'IT’S A TIE':`${direction(b.outcome)} WINS`}</h1><p>${b.status==='void'?'All stakes refunded.':`${money(b.start_price)} → ${money(b.end_price)} · ${mine?.prediction?`Your pick: ${direction(mine.prediction)}`:'No pick'}. ${b.outcome==='HOUSE'?'The test house keeps the entire pool.':b.outcome==='TIE'?'All stakes refunded.':`Winners split the ${paid?'test-USDC pool after a 1% house fee':'XP pool'}.`}`} ${settlement}</p><button class="primary" onclick="doAction('rematch')">REMATCH · ${stakeLabel}</button>`;}
   el('content').innerHTML=html;
   el('playerCount').textContent=paid?`${data.players.length}/${b.maxPlayers} joined · ${data.paymentProgress?.fundedPlayers||0} funded`:`${data.players.length} / ${b.maxPlayers} joined`;

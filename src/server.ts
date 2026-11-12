@@ -13,6 +13,7 @@ import { SlidingWindowRateLimiter } from './rate-limit.ts';
 import { publicAccount, publicBattle, publicPlayers, publicStats } from './public-view.ts';
 import { DevnetUsdcService, payConfigFromEnv, validatePayConfig } from './pay-mode.ts';
 import { paidDistribution } from './paid-settlement.ts';
+import { activateMarket, MARKET_PRODUCT } from './market.ts';
 
 if (existsSync('.env')) loadEnvFile('.env');
 const token = process.env.BOT_TOKEN || '';
@@ -159,6 +160,8 @@ async function settlePaidBattle(id: string) {
   } finally { settling.delete(id); }
 }
 engine.on('resolved', battle => void settlePaidBattle(battle.id).catch(error => console.error('Test-USDC settlement:', error)));
+const migratedBattles = activateMarket(engine);
+if (migratedBattles.length) console.log(`Market changed to ${MARKET_PRODUCT}; voided ${migratedBattles.length} unfinished battle(s).`);
 feed.start();
 function scheduleDaily() {
   const now = Date.now();
@@ -355,5 +358,5 @@ const server = createServer(async (req, res) => {
   }
 });
 const port = Number(process.env.PORT || 3000);
-server.listen(port, () => console.log(`SOL Quick Battle listening on ${port}`));
+server.listen(port, () => console.log(`Kampit BTC Quick Battle listening on ${port}`));
 void bot.setup(appUrl, webhookSecret).then(() => console.log('Telegram webhook configured')).catch(error => console.error('Telegram setup:', error));
