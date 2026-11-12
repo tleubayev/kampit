@@ -13,7 +13,7 @@ const INTENT_TTL_MS = 5 * 60_000;
 
 export type PayConfig = {
   enabled: boolean; publicAccess: boolean; network: 'testnet'; rpcUrl: string; apiKey: string;
-  escrowMnemonic: string; operatingMnemonic: string; treasuryMnemonic: string; allowedUsers: Set<string>;
+  escrowMnemonic: string; treasuryAddress: string; allowedUsers: Set<string>;
 };
 export type ChainTransfer = { hash: string; from: string; to: string; amountNano: number; comment: string };
 export type TonGateway = {
@@ -36,7 +36,7 @@ export function payConfigFromEnv(env = process.env): PayConfig {
   return {
     enabled: env.PAY_MODE_ENABLED === 'true', publicAccess: env.PAY_MODE_PUBLIC === 'true', network: 'testnet',
     rpcUrl: env.TON_RPC_URL || 'https://testnet.toncenter.com/api/v2/jsonRPC', apiKey: env.TON_API_KEY || '',
-    escrowMnemonic: env.TON_ESCROW_MNEMONIC || '', operatingMnemonic: env.TON_OPERATING_MNEMONIC || '', treasuryMnemonic: env.TON_TREASURY_MNEMONIC || '',
+    escrowMnemonic: env.TON_ESCROW_MNEMONIC || '', treasuryAddress: env.TON_TREASURY_ADDRESS || '',
     allowedUsers: new Set((env.PAY_MODE_TESTERS || '').split(',').map(value => value.trim()).filter(Boolean)),
   };
 }
@@ -44,9 +44,8 @@ export function validatePayConfig(config: PayConfig) {
   if (!config.enabled) return;
   if (!config.publicAccess && !config.allowedUsers.size) throw new Error('Pay mode requires PAY_MODE_PUBLIC=true or PAY_MODE_TESTERS');
   if (!config.apiKey) throw new Error('TON_API_KEY is required when GRAM test mode is enabled');
-  for (const [name, phrase] of [['TON_ESCROW_MNEMONIC', config.escrowMnemonic], ['TON_OPERATING_MNEMONIC', config.operatingMnemonic], ['TON_TREASURY_MNEMONIC', config.treasuryMnemonic]]) {
-    if (![12, 24].includes(words(phrase).length)) throw new Error(`${name} must contain a 12- or 24-word mnemonic`);
-  }
+  if (![12, 24].includes(words(config.escrowMnemonic).length)) throw new Error('TON_ESCROW_MNEMONIC must contain a 12- or 24-word mnemonic');
+  try { Address.parse(config.treasuryAddress); } catch { throw new Error('TON_TREASURY_ADDRESS must be a valid TON address'); }
 }
 
 export class TonCenterGateway implements TonGateway {
@@ -94,13 +93,13 @@ export class TonCenterGateway implements TonGateway {
 
 export class TonGramService {
   store: Store; config: PayConfig; gateway: TonGateway;
-  private roles?: { escrow: string; operating: string; treasury: string };
+  private roles?: { escrow: string; treasury: string };
   private payments = new Map<string, Promise<string>>(); private paymentSlots = 0; private paymentWaiters: (() => void)[] = [];
   constructor(store: Store, config: PayConfig, gateway?: TonGateway) { this.store = store; this.config = config; validatePayConfig(config); this.gateway = gateway || new TonCenterGateway(config); }
   async initialize() {
-    const [escrow, operating, treasury] = await Promise.all([this.gateway.address(this.config.escrowMnemonic), this.gateway.address(this.config.operatingMnemonic), this.gateway.address(this.config.treasuryMnemonic)]);
-    if (new Set([canonical(escrow), canonical(operating), canonical(treasury)]).size !== 3) throw new Error('Escrow, operating and treasury must be three different TON wallets');
-    this.roles = { escrow, operating, treasury }; return this.roles;
+    const escrow = await this.gateway.address(this.config.escrowMnemonic), treasury = this.config.treasuryAddress;
+    if (canonical(escrow) === canonical(treasury)) throw new Error('Escrow and treasury must be different TON wallets');
+    this.roles = { escrow, treasury }; return this.roles;
   }
   private async roleAddresses() { return this.roles || this.initialize(); }
   private async withPaymentSlot<T>(operation: () => Promise<T>) { if (this.paymentSlots >= MAX_PAYMENT_CONCURRENCY) await new Promise<void>(resolve => this.paymentWaiters.push(resolve)); this.paymentSlots++; try { return await operation(); } finally { this.paymentSlots--; this.paymentWaiters.shift()?.(); } }
@@ -161,8 +160,8 @@ export class TonGramService {
     const pendingStakes = this.store.db.prepare("SELECT * FROM pay_intents WHERE kind='stake' AND state='pending' ORDER BY updated_at LIMIT 100").all() as PaymentIntent[];
     let recovered = 0, failed = 0;
     for (const row of pendingStakes) { try { await this.confirmStake(row.battle_id, row.user_id, row.amount_minor); recovered++; } catch (error) { if (!(error instanceof GameError && error.status === 409)) { failed++; console.error('GRAM reconciliation:', row.battle_id, error); } } }
-    const roles = await this.roleAddresses(), [escrowNano, operatingNano, treasuryNano] = await Promise.all([this.gateway.balance(roles.escrow), this.gateway.balance(roles.operating), this.gateway.balance(roles.treasury)]);
+    const roles = await this.roleAddresses(), [escrowNano, treasuryNano] = await Promise.all([this.gateway.balance(roles.escrow), this.gateway.balance(roles.treasury)]);
     const obligationsNano = Number((this.store.db.prepare("SELECT COALESCE(SUM(amount_minor),0) AS total FROM pay_intents WHERE kind IN ('payout','refund') AND state IN ('pending','signed')").get() as { total: number }).total);
-    return { checked: pendingStakes.length, recovered, failed, pending: pendingStakes.length - recovered, wallets: { escrow: { address: roles.escrow, balanceNano: escrowNano, obligationsNano }, operating: { address: roles.operating, balanceNano: operatingNano }, treasury: { address: roles.treasury, balanceNano: treasuryNano } }, alerts: [...(escrowNano < obligationsNano ? ['Escrow GRAM is below pending payout obligations'] : []), ...(operatingNano < MIN_STAKE_NANO ? ['Operating wallet is below 0.10 GRAM'] : []), ...(failed ? [`${failed} GRAM reconciliation attempt(s) need attention`] : [])] };
+    return { checked: pendingStakes.length, recovered, failed, pending: pendingStakes.length - recovered, wallets: { escrow: { address: roles.escrow, balanceNano: escrowNano, obligationsNano }, treasury: { address: roles.treasury, balanceNano: treasuryNano } }, alerts: [...(escrowNano < obligationsNano ? ['Escrow GRAM is below pending payout obligations'] : []), ...(failed ? [`${failed} GRAM reconciliation attempt(s) need attention`] : [])] };
   }
 }

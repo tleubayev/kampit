@@ -13,11 +13,11 @@ async function wallet() {
   return { mnemonic: mnemonic.join(' '), address: contract.address.toString({ testOnly: true, bounceable: false }) };
 }
 
-const [escrow, operating, treasury] = await Promise.all([wallet(), wallet(), wallet()]);
+const [escrow, treasury] = await Promise.all([wallet(), wallet()]);
 writeFileSync(output, [
   'PAY_MODE_ENABLED=false', 'PAY_MODE_PUBLIC=false', 'TON_NETWORK=testnet',
   'TON_RPC_URL=https://testnet.toncenter.com/api/v2/jsonRPC', 'TON_API_KEY=',
-  `TON_ESCROW_MNEMONIC=${JSON.stringify(escrow.mnemonic)}`, `TON_OPERATING_MNEMONIC=${JSON.stringify(operating.mnemonic)}`,
-  `TON_TREASURY_MNEMONIC=${JSON.stringify(treasury.mnemonic)}`, `PAY_MODE_TESTERS=${tester}`, '',
+  `TON_ESCROW_MNEMONIC=${JSON.stringify(escrow.mnemonic)}`, `TON_TREASURY_ADDRESS=${treasury.address}`,
+  `TON_TREASURY_BACKUP_MNEMONIC=${JSON.stringify(treasury.mnemonic)}`, `PAY_MODE_TESTERS=${tester}`, '',
 ].join('\n'), { mode: 0o600 });
-console.log(JSON.stringify({ network: 'testnet', escrow: escrow.address, operating: operating.address, treasury: treasury.address, tester, secretBackup: output }, null, 2));
+console.log(JSON.stringify({ network: 'testnet', escrow: escrow.address, treasury: treasury.address, tester, secretBackup: output }, null, 2));

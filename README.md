@@ -44,15 +44,14 @@ Every stake request contains a random, single-use payment ID in its TON message 
 
 Payouts, refunds and house transfers use deterministic identifiers and unique database constraints. Reconciliation can safely retry after a restart without intentionally creating a second payment.
 
-Kampit uses three distinct application wallets:
+Kampit uses two distinct application wallets:
 
 | Wallet | Responsibility |
 |--------|----------------|
 | Escrow | Receives stakes and sends payouts or refunds |
-| Operating | Holds a limited operational fee reserve |
 | Treasury | Receives the 1% fee and flat-price house pools |
 
-The three recovery phrases are supplied through the deployment secret manager and are never stored in PostgreSQL or committed to Git.
+Only the escrow recovery phrase is supplied through the deployment secret manager so Kampit can settle games automatically. The treasury is configured by public address only, keeping its recovery phrase outside Railway, PostgreSQL and Git.
 
 ## Features
 
@@ -83,7 +82,7 @@ Telegram group ── battle card ──▶ Telegram Mini App
                               ▼              ▼
                          PostgreSQL      TON Testnet
                                          TON Connect
-                              escrow · operating · treasury
+                                 escrow · treasury
 ```
 
 The service runs as one application replica. A BTC quote older than five seconds cannot start or resolve a round. If fresh market data does not return within the resolution grace period, the battle is voided.
@@ -132,16 +131,15 @@ Bot commands:
 | `TON_RPC_URL` | TON Center-compatible Testnet endpoint |
 | `TON_API_KEY` | Dedicated TON Center API key; required when paid mode is enabled |
 | `TON_ESCROW_MNEMONIC` | Escrow wallet recovery phrase |
-| `TON_OPERATING_MNEMONIC` | Operating wallet recovery phrase |
-| `TON_TREASURY_MNEMONIC` | Treasury wallet recovery phrase |
+| `TON_TREASURY_ADDRESS` | Public address that receives Kampit's fees |
 
-Generate three fresh Testnet wallets locally:
+Generate two fresh Testnet wallets locally:
 
 ```bash
 pnpm setup:ton-testnet .pay-ton-testnet.env YOUR_TELEGRAM_ID
 ```
 
-The generated file is ignored by Git and created with owner-only permissions. Back it up securely before configuring Railway. Fund the escrow wallet with enough Testnet GRAM for stakes and payout fees, and fund the operating wallet with a small fee reserve.
+The generated file is ignored by Git and created with owner-only permissions. Back it up securely before configuring Railway. Only `TON_ESCROW_MNEMONIC` and the public `TON_TREASURY_ADDRESS` belong in Railway; keep `TON_TREASURY_BACKUP_MNEMONIC` offline. Fund the escrow wallet with enough Testnet GRAM for stakes and payout fees.
 
 ## Testing
 

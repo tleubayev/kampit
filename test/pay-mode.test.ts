@@ -7,14 +7,14 @@ import { MAX_STAKE_NANO, MIN_STAKE_NANO, TonGramService, payConfigFromEnv, valid
 
 const phrase = (word: string) => Array(12).fill(word).join(' ');
 const address = (digit: string) => Address.parseRaw(`0:${digit.repeat(64)}`).toString({ testOnly: true, bounceable: false });
-const roles = { escrow: address('1'), operating: address('2'), treasury: address('3') };
+const roles = { escrow: address('1'), treasury: address('3') };
 const userWallet = address('4');
-const config: PayConfig = { enabled: true, publicAccess: true, network: 'testnet', rpcUrl: 'https://test.invalid', apiKey: 'test-api-key', escrowMnemonic: phrase('escrow'), operatingMnemonic: phrase('operating'), treasuryMnemonic: phrase('treasury'), allowedUsers: new Set() };
+const config: PayConfig = { enabled: true, publicAccess: true, network: 'testnet', rpcUrl: 'https://test.invalid', apiKey: 'test-api-key', escrowMnemonic: phrase('escrow'), treasuryAddress: roles.treasury, allowedUsers: new Set() };
 
 class FakeGateway implements TonGateway {
   transfers: ChainTransfer[] = [];
   sends = 0;
-  async address(mnemonic: string) { return mnemonic === config.escrowMnemonic ? roles.escrow : mnemonic === config.operatingMnemonic ? roles.operating : roles.treasury; }
+  async address() { return roles.escrow; }
   async balance() { return 10_000_000_000; }
   async incoming(to: string) { return this.transfers.filter(item => Address.parse(item.to).equals(Address.parse(to))); }
   async send(_mnemonic: string, to: string, amountNano: number, comment: string) { this.sends++; const hash = `hash-${this.sends}`; this.transfers.push({ hash, from: roles.escrow, to, amountNano, comment }); return hash; }
@@ -22,9 +22,10 @@ class FakeGateway implements TonGateway {
 
 function fixture() { const store = new Store(':memory:'); store.ensureAccount('1', 'Ali'); const gateway = new FakeGateway(); const service = new TonGramService(store, config, gateway); return { store, gateway, service }; }
 
-test('GRAM mode is testnet-only and requires three wallet mnemonics', () => {
+test('GRAM mode is testnet-only and requires escrow signing plus a treasury address', () => {
   assert.throws(() => payConfigFromEnv({ TON_NETWORK: 'mainnet' } as NodeJS.ProcessEnv), /locked to TON testnet/);
   assert.throws(() => validatePayConfig({ ...config, escrowMnemonic: '' }), /TON_ESCROW_MNEMONIC/);
+  assert.throws(() => validatePayConfig({ ...config, treasuryAddress: '' }), /TON_TREASURY_ADDRESS/);
   assert.throws(() => validatePayConfig({ ...config, apiKey: '' }), /TON_API_KEY/);
   assert.throws(() => validatePayConfig({ ...config, publicAccess: false, allowedUsers: new Set() }), /PAY_MODE_TESTERS/);
   assert.equal(payConfigFromEnv({ PAY_MODE_ENABLED: 'false' } as NodeJS.ProcessEnv).network, 'testnet');
@@ -32,8 +33,7 @@ test('GRAM mode is testnet-only and requires three wallet mnemonics', () => {
 
 test('initialization rejects reused Kampit role wallets', async () => {
   const { store, gateway } = fixture();
-  gateway.address = async () => roles.escrow;
-  await assert.rejects(() => new TonGramService(store, config, gateway).initialize(), /three different TON wallets/);
+  await assert.rejects(() => new TonGramService(store, { ...config, treasuryAddress: roles.escrow }, gateway).initialize(), /different TON wallets/);
   store.close();
 });
 
