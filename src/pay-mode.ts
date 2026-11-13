@@ -64,8 +64,16 @@ export class TonCenterGateway implements TonGateway {
   }
   async address(mnemonic: string) { return (await this.wallet(mnemonic)).contract.address.toString({ testOnly: true, bounceable: false }); }
   async balance(address: string) { return Number(await this.client.getBalance(Address.parse(address))); }
+  private async transactions(address: Address) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { return await this.client.getTransactions(address, { limit: 100 }); }
+      catch (error) { lastError = error; if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1))); }
+    }
+    throw lastError;
+  }
   async incoming(address: string) {
-    const target = Address.parse(address), transactions = await this.client.getTransactions(target, { limit: 100, archival: true }), result: ChainTransfer[] = [];
+    const target = Address.parse(address), transactions = await this.transactions(target), result: ChainTransfer[] = [];
     for (const tx of transactions) {
       const message = tx.inMessage; if (!message || message.info.type !== 'internal') continue;
       result.push({ hash: tx.hash().toString('hex'), from: message.info.src.toRawString(), to: target.toRawString(), amountNano: Number(message.info.value.coins), comment: parseComment(message.body) });
@@ -73,7 +81,7 @@ export class TonCenterGateway implements TonGateway {
     return result;
   }
   private async outgoing(address: string) {
-    const owner = Address.parse(address), transactions = await this.client.getTransactions(owner, { limit: 100, archival: true }), result: ChainTransfer[] = [];
+    const owner = Address.parse(address), transactions = await this.transactions(owner), result: ChainTransfer[] = [];
     for (const tx of transactions) for (const message of tx.outMessages.values()) {
       if (message.info.type !== 'internal') continue;
       result.push({ hash: tx.hash().toString('hex'), from: owner.toRawString(), to: message.info.dest.toRawString(), amountNano: Number(message.info.value.coins), comment: parseComment(message.body) });
@@ -159,7 +167,7 @@ export class TonGramService {
   async reconcile() {
     const pendingStakes = this.store.db.prepare("SELECT * FROM pay_intents WHERE kind='stake' AND state='pending' ORDER BY updated_at LIMIT 100").all() as PaymentIntent[];
     let recovered = 0, failed = 0;
-    for (const row of pendingStakes) { try { await this.confirmStake(row.battle_id, row.user_id, row.amount_minor); recovered++; } catch (error) { if (!(error instanceof GameError && error.status === 409)) { failed++; console.error('GRAM reconciliation:', row.battle_id, error); } } }
+    for (const row of pendingStakes) { try { await this.confirmStake(row.battle_id, row.user_id, row.amount_minor); recovered++; } catch (error) { if (!(error instanceof GameError && error.status === 409)) { failed++; console.error('GRAM reconciliation failed:', row.battle_id, error instanceof Error ? error.message : 'upstream error'); } } }
     const roles = await this.roleAddresses(), [escrowNano, treasuryNano] = await Promise.all([this.gateway.balance(roles.escrow), this.gateway.balance(roles.treasury)]);
     const obligationsNano = Number((this.store.db.prepare("SELECT COALESCE(SUM(amount_minor),0) AS total FROM pay_intents WHERE kind IN ('payout','refund') AND state IN ('pending','signed')").get() as { total: number }).total);
     return { checked: pendingStakes.length, recovered, failed, pending: pendingStakes.length - recovered, wallets: { escrow: { address: roles.escrow, balanceNano: escrowNano, obligationsNano }, treasury: { address: roles.treasury, balanceNano: treasuryNano } }, alerts: [...(escrowNano < obligationsNano ? ['Escrow GRAM is below pending payout obligations'] : []), ...(failed ? [`${failed} GRAM reconciliation attempt(s) need attention`] : [])] };

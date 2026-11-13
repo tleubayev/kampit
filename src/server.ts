@@ -32,6 +32,7 @@ validatePayConfig(payConfig);
 if (payConfig.enabled && adminPassword.length < 16) { console.error('ADMIN_PASSWORD (16+ chars) is required when pay mode is enabled.'); process.exit(1); }
 const payMode = payConfig.enabled ? new TonGramService(store, payConfig) : null;
 if (payMode) await payMode.initialize();
+const safeError = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
 store.grantDaily();
 store.db.exec('CREATE TABLE IF NOT EXISTS processed_updates (update_id INTEGER PRIMARY KEY);');
 const engine = new Engine(store);
@@ -133,7 +134,7 @@ async function deliverResult(id: string) {
   try {
     await bot.result(engine.require(id));
     store.db.prepare('INSERT OR IGNORE INTO result_deliveries(battle_id,sent_at) VALUES(?,?)').run(id, Date.now());
-  } catch (error) { console.error('Result post:', error); }
+  } catch (error) { console.error('Result post:', safeError(error)); }
   finally { delivering.delete(id); }
 }
 engine.on('resolved', battle => void deliverResult(battle.id));
@@ -160,7 +161,7 @@ async function settlePaidBattle(id: string) {
     store.db.prepare("UPDATE paid_battles SET settlement_status='settled' WHERE battle_id=?").run(id); broadcast(id);
   } finally { settling.delete(id); }
 }
-engine.on('resolved', battle => void settlePaidBattle(battle.id).catch(error => console.error('Testnet GRAM settlement:', error)));
+engine.on('resolved', battle => void settlePaidBattle(battle.id).catch(error => console.error('Testnet GRAM settlement:', safeError(error))));
 const migratedBattles = activateMarket(engine);
 if (migratedBattles.length) console.log(`Market changed to ${MARKET_PRODUCT}; voided ${migratedBattles.length} unfinished battle(s).`);
 feed.start();
@@ -170,7 +171,7 @@ function scheduleDaily() {
   setTimeout(() => { store.grantDaily(); for (const id of streams.keys()) broadcast(id); scheduleDaily(); }, nextMidnight - now);
 }
 scheduleDaily();
-setInterval(() => { try { engine.tick(Date.now(), feed.fresh(), new Set(funding.keys())); for (const id of streams.keys()) broadcast(id); } catch (error) { console.error('Battle tick:', error); } }, 1000);
+setInterval(() => { try { engine.tick(Date.now(), feed.fresh(), new Set(funding.keys())); for (const id of streams.keys()) broadcast(id); } catch (error) { console.error('Battle tick:', safeError(error)); } }, 1000);
 setInterval(() => { for (const [key, value] of sessions) if (value.expires < Date.now()) sessions.delete(key); }, 60000);
 setInterval(() => {
   const rows = store.db.prepare("SELECT id FROM battles WHERE status IN ('finished','void') AND id NOT IN (SELECT battle_id FROM result_deliveries)").all() as { id: string }[];
@@ -179,7 +180,7 @@ setInterval(() => {
 setInterval(() => {
   if (!payMode) return;
   const rows = store.db.prepare("SELECT pb.battle_id AS id FROM paid_battles pb JOIN battles b ON b.id=pb.battle_id WHERE pb.asset='gram' AND pb.settlement_status='pending' AND b.status IN ('finished','void')").all() as { id: string }[];
-  for (const row of rows) void settlePaidBattle(row.id).catch(error => console.error('Testnet GRAM settlement retry:', error));
+  for (const row of rows) void settlePaidBattle(row.id).catch(error => console.error('Testnet GRAM settlement retry:', safeError(error)));
 }, 10000);
 async function reconcilePayments() {
   if (!payMode) return;
@@ -190,7 +191,7 @@ async function reconcilePayments() {
     const changed = JSON.stringify(next.alerts) !== JSON.stringify(paymentHealth?.alerts || []);
     paymentHealth = next;
     if (changed && next.alerts.length) console.error('TREASURY ALERT:', next.alerts.join('; '));
-  } catch (error) { console.error('Payment reconciliation worker:', error); }
+  } catch (error) { console.error('Payment reconciliation worker:', safeError(error)); }
 }
 if (payMode) { void reconcilePayments(); setInterval(() => void reconcilePayments(), 30000); }
 
@@ -333,7 +334,7 @@ const server = createServer(async (req, res) => {
       if (req.method === 'POST' && parts[3] === 'rematch') {
         const next = engine.rematch(id, String(actor.user.id));
         access.session.battles.add(next.id);
-        if (!next.message_id) void bot.card(next).catch(error => console.error('Rematch card:', error));
+        if (!next.message_id) void bot.card(next).catch(error => console.error('Rematch card:', safeError(error)));
         json(res, 200, { id: next.id }); return;
       }
       throw new GameError('Not found', 404);
@@ -341,7 +342,7 @@ const server = createServer(async (req, res) => {
     throw new GameError('Not found', 404);
   } catch (error) {
     const status = error instanceof GameError ? error.status : 500;
-    if (status === 500) console.error(error);
+    if (status === 500) console.error('Request failed:', safeError(error));
     if (!res.headersSent) {
       if (status === 429) res.setHeader('retry-after', '60');
       json(res, status, { error: error instanceof Error ? error.message : 'Server error' });
@@ -350,4 +351,4 @@ const server = createServer(async (req, res) => {
 });
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => console.log(`Kampit BTC Quick Battle listening on ${port}`));
-void bot.setup(appUrl, webhookSecret).then(() => console.log('Telegram webhook configured')).catch(error => console.error('Telegram setup:', error));
+void bot.setup(appUrl, webhookSecret).then(() => console.log('Telegram webhook configured')).catch(error => console.error('Telegram setup:', safeError(error)));
