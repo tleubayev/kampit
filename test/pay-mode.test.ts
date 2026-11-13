@@ -50,6 +50,15 @@ test('stake intent binds one payment ID to exact wallet, amount, battle and escr
   assert.equal(row.state, 'confirmed'); assert.equal(row.signature, 'stake-hash'); store.close();
 });
 
+test('retry discovers the original on-chain stake instead of requesting another payment', async () => {
+  const { store, gateway, service } = fixture(); await service.initialize();
+  const intent = await service.prepareStake('retry', '1', MIN_STAKE_NANO, userWallet);
+  gateway.transfers.push({ hash: 'already-paid', from: userWallet, to: roles.escrow, amountNano: MIN_STAKE_NANO, comment: `kampit:${intent.paymentId}` });
+  assert.deepEqual(await service.prepareStake('retry', '1', MIN_STAKE_NANO, userWallet), { confirmed: true });
+  const row = store.db.prepare("SELECT state,signature FROM pay_intents WHERE battle_id='retry' AND user_id='1' AND kind='stake'").get() as any;
+  assert.equal(row.state, 'confirmed'); assert.equal(row.signature, 'already-paid'); store.close();
+});
+
 test('stake limits are enforced before a transaction request is created', async () => {
   const { store, service } = fixture(); await service.initialize();
   await assert.rejects(() => service.prepareStake('low', '1', MIN_STAKE_NANO - 1, userWallet), /between 0.10 and 20 GRAM/);

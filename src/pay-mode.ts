@@ -125,6 +125,10 @@ export class TonGramService {
     const existing = this.intent(battleId, userId, 'stake'); if (existing?.state === 'confirmed') return { confirmed: true };
     const activeIntent = existing?.last_valid_block_height && existing.last_valid_block_height > Date.now();
     if (existing && activeIntent && existing.raw_transaction && canonical(existing.raw_transaction) !== canonical(wallet)) throw new GameError('Finish this stake with the wallet that created it, or wait for it to expire', 409);
+    if (existing && activeIntent) {
+      try { await this.confirmStake(battleId, userId, amountNano); return { confirmed: true }; }
+      catch (error) { if (!(error instanceof GameError && error.status === 409)) throw error; }
+    }
     const paymentId = activeIntent && existing?.blockhash ? existing.blockhash : randomBytes(24).toString('base64url');
     const expiresAt = activeIntent ? existing!.last_valid_block_height! : Date.now() + INTENT_TTL_MS;
     if (!existing) this.store.db.prepare("INSERT INTO pay_intents(battle_id,user_id,kind,amount_minor,state,raw_transaction,blockhash,last_valid_block_height,updated_at) VALUES(?,?,'stake',?,'pending',?,?,?,?)").run(battleId, userId, amountNano, wallet, paymentId, expiresAt, Date.now());
