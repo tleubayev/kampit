@@ -83,6 +83,17 @@ test('house transfers go from escrow to the separate treasury wallet', async () 
   assert.equal(gateway.transfers[0].comment, 'kampit-out:house:battle:house'); store.close();
 });
 
+test('duplicate stake recovery is persisted and idempotent', async () => {
+  const { store, gateway, service } = fixture(); await service.initialize();
+  store.db.prepare("INSERT INTO pay_wallets(user_id,address,encrypted_secret,created_at) VALUES(?,?,'ton-connect',1) ON CONFLICT(user_id) DO UPDATE SET address=excluded.address,encrypted_secret='ton-connect'").run('1', userWallet);
+  const source = 'a'.repeat(64);
+  assert.equal(await service.recoverDuplicate('battle', '1', source, MIN_STAKE_NANO), 'hash-1');
+  assert.equal(await service.recoverDuplicate('battle', '1', source, MIN_STAKE_NANO), 'hash-1');
+  assert.equal(gateway.sends, 1);
+  const row = store.db.prepare('SELECT amount_minor,refund_signature FROM pay_recoveries WHERE source_signature=?').get(source) as any;
+  assert.equal(row.amount_minor, MIN_STAKE_NANO); assert.equal(row.refund_signature, 'hash-1'); store.close();
+});
+
 test('paid GRAM readiness never changes XP balances', () => {
   const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', MIN_STAKE_NANO, '1', 1000);
   engine.join(battle.id, '1', 'A'); engine.join(battle.id, '2', 'B');

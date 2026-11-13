@@ -167,6 +167,18 @@ export class TonGramService {
   }
   async pay(userId: string, battleId: string, kind: 'payout' | 'refund', amountNano: number) { return this.payment(battleId, userId, kind, amountNano, async () => { const wallet = this.store.db.prepare("SELECT address FROM pay_wallets WHERE user_id=? AND encrypted_secret='ton-connect'").get(userId) as { address: string } | undefined; if (!wallet) throw new Error('Confirmed player TON wallet is missing'); return wallet.address; }); }
   async house(battleId: string, amountNano: number) { return this.payment(battleId, 'house', 'house', amountNano, async () => (await this.roleAddresses()).treasury); }
+  async recoverDuplicate(battleId: string, userId: string, sourceSignature: string, amountNano: number) {
+    if (!/^[a-f0-9]{64}$/i.test(sourceSignature)) throw new GameError('Invalid duplicate transaction hash');
+    if (!Number.isSafeInteger(amountNano) || amountNano <= 0) throw new GameError('Invalid GRAM recovery amount');
+    const prior = this.store.db.prepare('SELECT refund_signature,amount_minor FROM pay_recoveries WHERE source_signature=?').get(sourceSignature) as { refund_signature: string; amount_minor: number } | undefined;
+    if (prior) { if (Number(prior.amount_minor) !== amountNano) throw new Error('Recorded recovery amount mismatch'); return prior.refund_signature; }
+    const wallet = this.store.db.prepare("SELECT address FROM pay_wallets WHERE user_id=? AND encrypted_secret='ton-connect'").get(userId) as { address: string } | undefined;
+    if (!wallet) throw new Error('Recovery wallet is missing');
+    const comment = `kampit-recovery:${sourceSignature}`;
+    const hash = await this.gateway.send(this.config.escrowMnemonic, wallet.address, amountNano, comment);
+    this.store.db.prepare('INSERT OR IGNORE INTO pay_recoveries(source_signature,battle_id,user_id,amount_minor,refund_signature,created_at) VALUES(?,?,?,?,?,?)').run(sourceSignature, battleId, userId, amountNano, hash, Date.now());
+    return (this.store.db.prepare('SELECT refund_signature FROM pay_recoveries WHERE source_signature=?').get(sourceSignature) as { refund_signature: string }).refund_signature;
+  }
   history(userId: string, limit = 50) { this.assertTester(userId); return (this.store.db.prepare("SELECT battle_id AS id,kind,amount_minor,state,signature,attempt,updated_at FROM pay_intents WHERE user_id=? AND kind!='withdrawal' ORDER BY updated_at DESC LIMIT ?").all(userId, Math.min(100, Math.max(1, limit))) as any[]).map(row => ({ id: row.id, kind: row.kind, amountNano: Number(row.amount_minor), state: row.state, hash: row.signature, updatedAt: Number(row.updated_at), explorerUrl: row.signature ? `https://testnet.tonviewer.com/transaction/${row.signature}` : null })); }
   async reconcile() {
     const pendingStakes = this.store.db.prepare("SELECT * FROM pay_intents WHERE kind='stake' AND state='pending' ORDER BY updated_at LIMIT 100").all() as PaymentIntent[];

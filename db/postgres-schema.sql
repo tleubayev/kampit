@@ -51,6 +51,11 @@ CREATE TABLE IF NOT EXISTS pay_transfers (
   amount_minor bigint NOT NULL CHECK(amount_minor > 0), signature text NOT NULL UNIQUE,
   created_at bigint NOT NULL, UNIQUE(battle_id,user_id,kind)
 );
+CREATE TABLE IF NOT EXISTS pay_recoveries (
+  source_signature text PRIMARY KEY, battle_id text NOT NULL, user_id text NOT NULL,
+  amount_minor bigint NOT NULL CHECK(amount_minor > 0), refund_signature text NOT NULL UNIQUE,
+  created_at bigint NOT NULL
+);
 CREATE TABLE IF NOT EXISTS pay_intents (
   battle_id text NOT NULL, user_id text NOT NULL,
   kind text NOT NULL CHECK(kind IN ('stake','payout','refund','withdrawal','house')),
