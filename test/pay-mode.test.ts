@@ -59,6 +59,14 @@ test('retry discovers the original on-chain stake instead of requesting another 
   assert.equal(row.state, 'confirmed'); assert.equal(row.signature, 'already-paid'); store.close();
 });
 
+test('an expired intent still recovers a payment that already reached escrow', async () => {
+  const { store, gateway, service } = fixture(); await service.initialize();
+  const intent = await service.prepareStake('expired-paid', '1', MIN_STAKE_NANO, userWallet);
+  store.db.prepare("UPDATE pay_intents SET last_valid_block_height=1 WHERE battle_id='expired-paid' AND user_id='1' AND kind='stake'").run();
+  gateway.transfers.push({ hash: 'late-confirmation', from: userWallet, to: roles.escrow, amountNano: MIN_STAKE_NANO, comment: `kampit:${intent.paymentId}` });
+  assert.equal(await service.confirmStake('expired-paid', '1', MIN_STAKE_NANO), 'late-confirmation'); store.close();
+});
+
 test('stake limits are enforced before a transaction request is created', async () => {
   const { store, service } = fixture(); await service.initialize();
   await assert.rejects(() => service.prepareStake('low', '1', MIN_STAKE_NANO - 1, userWallet), /between 0.10 and 20 GRAM/);

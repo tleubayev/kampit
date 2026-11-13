@@ -141,10 +141,12 @@ export class TonGramService {
     const intent = this.intent(battleId, userId, 'stake');
     if (!intent || intent.amount_minor !== amountNano || !intent.blockhash || !intent.raw_transaction) throw new GameError('Create and approve the GRAM stake first', 409);
     if (intent.state === 'confirmed' && intent.signature) return intent.signature;
-    if (intent.last_valid_block_height && intent.last_valid_block_height < Date.now()) throw new GameError('Stake request expired. Please approve a new transaction.', 409);
     const roles = await this.roleAddresses();
     const transfer = (await this.gateway.incoming(roles.escrow)).find(item => item.comment === `kampit:${intent.blockhash}` && item.amountNano === amountNano && canonical(item.from) === canonical(intent.raw_transaction!) && canonical(item.to) === canonical(roles.escrow));
-    if (!transfer) throw new GameError('GRAM stake is still confirming', 409);
+    if (!transfer) {
+      if (intent.last_valid_block_height && intent.last_valid_block_height < Date.now()) throw new GameError('Stake request expired. Please approve a new transaction.', 409);
+      throw new GameError('GRAM stake is still confirming', 409);
+    }
     this.recordConfirmed(intent, transfer.hash); return transfer.hash;
   }
   private recordConfirmed(intent: PaymentIntent, hash: string) {
