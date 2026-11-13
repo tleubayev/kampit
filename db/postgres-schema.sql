@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS players (
   prediction text, joined_at bigint NOT NULL DEFAULT 0,
   PRIMARY KEY(battle_id,user_id)
 );
+UPDATE players SET joined_at=COALESCE((SELECT created_at FROM battles WHERE battles.id=players.battle_id),0) WHERE joined_at=0;
 CREATE TABLE IF NOT EXISTS result_deliveries (
   battle_id text PRIMARY KEY REFERENCES battles(id) ON DELETE CASCADE,
   sent_at bigint NOT NULL

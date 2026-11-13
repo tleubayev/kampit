@@ -26,6 +26,14 @@ test('battle accepts 100 players and rejects the 101st', () => {
   store.close();
 });
 
+test('joining records the first join time and a rename preserves it', () => {
+  const { store, engine } = fixture(); const battle = engine.create('g', 10, '1', 1000);
+  engine.join(battle.id, '1', 'Ali', 1234);
+  engine.join(battle.id, '1', 'Renamed', 9999);
+  const player = store.db.prepare('SELECT name,joined_at FROM players WHERE battle_id=? AND user_id=?').get(battle.id, '1') as any;
+  assert.equal(player.name, 'Renamed'); assert.equal(player.joined_at, 1234); store.close();
+});
+
 test('paid battle accepts 10 players and rejects the 11th', () => {
   const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000_000, '1');
   for (let i = 1; i <= MAX_PAID_PLAYERS; i++) engine.join(battle.id, String(i), `Player ${i}`);

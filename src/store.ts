@@ -37,6 +37,9 @@ export class Store {
     if (!columns.some(c => c.name === 'stake')) this.db.exec('ALTER TABLE battles ADD COLUMN stake INTEGER NOT NULL DEFAULT 0');
     if (!columns.some(c => c.name === 'creator_user_id')) this.db.exec('ALTER TABLE battles ADD COLUMN creator_user_id TEXT');
     if (!columns.some(c => c.name === 'lobby_deadline')) this.db.exec('ALTER TABLE battles ADD COLUMN lobby_deadline INTEGER');
+    const playerColumns = this.db.prepare('PRAGMA table_info(players)').all() as { name: string }[];
+    if (!playerColumns.some(c => c.name === 'joined_at')) this.db.exec('ALTER TABLE players ADD COLUMN joined_at INTEGER NOT NULL DEFAULT 0');
+    this.db.exec('UPDATE players SET joined_at=COALESCE((SELECT created_at FROM battles WHERE battles.id=players.battle_id),0) WHERE joined_at=0');
     this.db.exec(`CREATE TABLE IF NOT EXISTS accounts (user_id TEXT PRIMARY KEY, name TEXT NOT NULL, balance INTEGER NOT NULL CHECK(balance >= 0), referral_code TEXT NOT NULL UNIQUE, referred_by TEXT, last_daily_date TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pay_wallets (user_id TEXT PRIMARY KEY REFERENCES accounts(user_id), address TEXT NOT NULL UNIQUE, encrypted_secret TEXT NOT NULL, created_at INTEGER NOT NULL);

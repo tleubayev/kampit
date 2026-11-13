@@ -56,7 +56,7 @@ export class Engine extends EventEmitter {
     if (!battle) throw new GameError('Battle not found', 404);
     return battle;
   }
-  join(id: string, userId: string, name: string) {
+  join(id: string, userId: string, name: string, now = Date.now()) {
     const battle = this.require(id);
     if (battle.status !== 'lobby') throw new GameError('Lobby is closed');
     const clean = name.trim().slice(0, 40) || 'Player';
@@ -68,8 +68,8 @@ export class Engine extends EventEmitter {
         const limit = this.store.paidBattle(id) ? MAX_PAID_PLAYERS : MAX_PLAYERS;
         if (count >= limit) throw new GameError(`Battle is full (${limit} players)`, 409);
       }
-      this.store.ensureAccount(userId, clean);
-      this.store.db.prepare('INSERT INTO players(battle_id,user_id,name) VALUES(?,?,?) ON CONFLICT(battle_id,user_id) DO UPDATE SET name=excluded.name').run(id, userId, clean);
+      this.store.ensureAccount(userId, clean, now);
+      this.store.db.prepare('INSERT INTO players(battle_id,user_id,name,joined_at) VALUES(?,?,?,?) ON CONFLICT(battle_id,user_id) DO UPDATE SET name=excluded.name').run(id, userId, clean, now);
       this.store.db.exec('COMMIT');
     } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
     this.emit('change', battle);
