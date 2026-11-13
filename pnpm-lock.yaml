@@ -13,14 +13,14 @@ importers:
   .:
     dependencies:
       '@ton/core':
-        specifier: ^0.62.0
-        version: 0.62.1(@ton/crypto@3.3.0)
+        specifier: ^0.63.1
+        version: 0.63.1(@ton/crypto@3.3.0)
       '@ton/crypto':
         specifier: ^3.3.0
         version: 3.3.0
       '@ton/ton':
         specifier: ^16.1.0
-        version: 16.3.0(@ton/core@0.62.1(@ton/crypto@3.3.0))(@ton/crypto@3.3.0)(debug@4.4.3)
+        version: 16.3.0(@ton/core@0.63.1(@ton/crypto@3.3.0))(@ton/crypto@3.3.0)(debug@4.4.3)
       '@tonconnect/ui':
         specifier: 5.0.1
         version: 5.0.1
@@ -30,8 +30,8 @@ importers:
 
 packages:
 
-  '@ton/core@0.62.1':
-    resolution: {integrity: sha512-RaEGBo9gCf6ZHyS8SKq1K53pswvYW9E5A6vwUuzFBTRX14g4qMDlB9F+fq4aBE5kN7XyVr8ScQtOJfQj41usCw==}
+  '@ton/core@0.63.1':
+    resolution: {integrity: sha512-hDWMjlKzc18W2E4OeV3hUP8ohRJNHPD4Wd1+AQJj8zshZyCRT0usrvnExgbNUTo/vntDqCGMzgYWbXxyaA+L4g==}
     peerDependencies:
       '@ton/crypto': '>=3.2.0'
 
@@ -233,7 +233,7 @@ packages:
 
 snapshots:
 
-  '@ton/core@0.62.1(@ton/crypto@3.3.0)':
+  '@ton/core@0.63.1(@ton/crypto@3.3.0)':
     dependencies:
       '@ton/crypto': 3.3.0
 
@@ -247,9 +247,9 @@ snapshots:
       jssha: 3.2.0
       tweetnacl: 1.0.3
 
-  '@ton/ton@16.3.0(@ton/core@0.62.1(@ton/crypto@3.3.0))(@ton/crypto@3.3.0)(debug@4.4.3)':
+  '@ton/ton@16.3.0(@ton/core@0.63.1(@ton/crypto@3.3.0))(@ton/crypto@3.3.0)(debug@4.4.3)':
     dependencies:
-      '@ton/core': 0.62.1(@ton/crypto@3.3.0)
+      '@ton/core': 0.63.1(@ton/crypto@3.3.0)
       '@ton/crypto': 3.3.0
       axios: 1.21.1(debug@4.4.3)
       dataloader: 2.2.3

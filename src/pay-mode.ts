@@ -51,6 +51,7 @@ export function validatePayConfig(config: PayConfig) {
 export class TonCenterGateway implements TonGateway {
   private client: TonClient;
   private wallets = new Map<string, Promise<{ contract: WalletContractV5R1; secretKey: Buffer }>>();
+  private sendQueue: Promise<void> = Promise.resolve();
   constructor(config: PayConfig) { this.client = new TonClient({ endpoint: config.rpcUrl, apiKey: config.apiKey || undefined }); }
   private wallet(mnemonic: string) {
     let value = this.wallets.get(mnemonic);
@@ -89,6 +90,11 @@ export class TonCenterGateway implements TonGateway {
     return result;
   }
   async send(mnemonic: string, to: string, amountNano: number, comment: string) {
+    const task = this.sendQueue.then(() => this.sendOne(mnemonic, to, amountNano, comment));
+    this.sendQueue = task.then(() => undefined, () => undefined);
+    return task;
+  }
+  private async sendOne(mnemonic: string, to: string, amountNano: number, comment: string) {
     const owner = await this.wallet(mnemonic), opened = this.client.open(owner.contract);
     const find = async () => (await this.outgoing(owner.contract.address.toString({ testOnly: true }))).find(item => canonical(item.to) === canonical(to) && item.amountNano === amountNano && item.comment === comment);
     const existing = await find(); if (existing) return existing.hash;

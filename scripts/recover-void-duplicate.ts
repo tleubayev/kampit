@@ -14,11 +14,11 @@ try {
   await service.confirmStake(battleId, otherUser, MIN_STAKE_NANO);
   const duplicateSource = [sourceA, sourceB].find(source => source !== confirmed);
   if (!duplicateSource) throw new Error('Could not distinguish the confirmed and duplicate deposits');
-  const refunds = await Promise.all([
-    service.pay(duplicatedUser, battleId, 'refund', MIN_STAKE_NANO),
-    service.pay(otherUser, battleId, 'refund', MIN_STAKE_NANO),
-    service.recoverDuplicate(battleId, duplicatedUser, duplicateSource, MIN_STAKE_NANO),
-  ]);
+  const refunds = [
+    await service.pay(duplicatedUser, battleId, 'refund', MIN_STAKE_NANO),
+    await service.pay(otherUser, battleId, 'refund', MIN_STAKE_NANO),
+    await service.recoverDuplicate(battleId, duplicatedUser, duplicateSource, MIN_STAKE_NANO),
+  ];
   store.db.prepare("UPDATE paid_battles SET settlement_status='settled' WHERE battle_id=?").run(battleId);
   console.log(JSON.stringify({ battleId, refunds, totalRefundedNano: MIN_STAKE_NANO * 3 }));
 } finally { store.close(); }
