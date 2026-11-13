@@ -43,7 +43,7 @@ export class Store {
     this.db.exec(`CREATE TABLE IF NOT EXISTS accounts (user_id TEXT PRIMARY KEY, name TEXT NOT NULL, balance INTEGER NOT NULL CHECK(balance >= 0), referral_code TEXT NOT NULL UNIQUE, referred_by TEXT, last_daily_date TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pay_wallets (user_id TEXT PRIMARY KEY REFERENCES accounts(user_id), address TEXT NOT NULL UNIQUE, encrypted_secret TEXT NOT NULL, created_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS paid_battles (battle_id TEXT PRIMARY KEY REFERENCES battles(id), stake_minor INTEGER NOT NULL CHECK(stake_minor >= 100000), settlement_status TEXT NOT NULL DEFAULT 'pending', asset TEXT NOT NULL DEFAULT 'legacy_usdc');
+      CREATE TABLE IF NOT EXISTS paid_battles (battle_id TEXT PRIMARY KEY REFERENCES battles(id), stake_minor INTEGER NOT NULL CHECK(stake_minor >= 100000), settlement_status TEXT NOT NULL DEFAULT 'pending', asset TEXT NOT NULL DEFAULT 'legacy_usdc', network TEXT NOT NULL DEFAULT 'testnet');
       CREATE TABLE IF NOT EXISTS pay_faucets (user_id TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL, signature TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS pay_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, battle_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('stake','payout','refund')), amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), signature TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, UNIQUE(battle_id,user_id,kind));
       CREATE TABLE IF NOT EXISTS pay_recoveries (source_signature TEXT PRIMARY KEY, battle_id TEXT NOT NULL, user_id TEXT NOT NULL, amount_minor INTEGER NOT NULL CHECK(amount_minor > 0), refund_signature TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
@@ -66,6 +66,7 @@ export class Store {
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS pay_wallets_privy_id ON pay_wallets(privy_wallet_id) WHERE privy_wallet_id IS NOT NULL');
     const paidBattleColumns = this.db.prepare('PRAGMA table_info(paid_battles)').all() as { name: string }[];
     if (!paidBattleColumns.some(c => c.name === 'asset')) this.db.exec("ALTER TABLE paid_battles ADD COLUMN asset TEXT NOT NULL DEFAULT 'legacy_usdc'");
+    if (!paidBattleColumns.some(c => c.name === 'network')) this.db.exec("ALTER TABLE paid_battles ADD COLUMN network TEXT NOT NULL DEFAULT 'testnet'");
     const accountColumns = this.db.prepare('PRAGMA table_info(accounts)').all() as { name: string }[];
     if (!accountColumns.some(c => c.name === 'created_at')) this.db.exec('ALTER TABLE accounts ADD COLUMN created_at INTEGER');
     if (!accountColumns.some(c => c.name === 'last_seen_at')) this.db.exec('ALTER TABLE accounts ADD COLUMN last_seen_at INTEGER');
@@ -133,7 +134,7 @@ export class Store {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   get(id: string) { return this.db.prepare('SELECT * FROM battles WHERE id=?').get(id) as Battle | undefined; }
-  paidBattle(id: string) { return this.db.prepare('SELECT battle_id,stake_minor,settlement_status,asset FROM paid_battles WHERE battle_id=?').get(id) as { battle_id: string; stake_minor: number; settlement_status: string; asset: string } | undefined; }
+  paidBattle(id: string) { return this.db.prepare('SELECT battle_id,stake_minor,settlement_status,asset,network FROM paid_battles WHERE battle_id=?').get(id) as { battle_id: string; stake_minor: number; settlement_status: string; asset: string; network: 'testnet' | 'mainnet' } | undefined; }
   players(id: string) { return this.db.prepare('SELECT * FROM players WHERE battle_id=? ORDER BY rowid').all(id) as Player[]; }
   active(chatId: string) { return this.db.prepare("SELECT * FROM battles WHERE chat_id=? AND status IN ('lobby','countdown','live') ORDER BY created_at DESC LIMIT 1").get(chatId) as Battle | undefined; }
   pending() { return this.db.prepare("SELECT * FROM battles WHERE status IN ('countdown','live')").all() as Battle[]; }

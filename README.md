@@ -3,7 +3,7 @@
 [![TON](https://img.shields.io/badge/TON-Testnet-0098EA)](https://ton.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Node.js%2024-3178C6)](https://www.typescriptlang.org/)
 [![Telegram](https://img.shields.io/badge/Telegram-Mini%20App-26A5E4)](https://t.me/Kampit_robot)
-[![Tests](https://img.shields.io/badge/tests-34%20passing-76f1b0)](#testing)
+[![Tests](https://img.shields.io/badge/tests-41%20passing-76f1b0)](#testing)
 
 > Challenge a Telegram group to a synchronized 60-second BTC/USD battle. Pick **UP** or **DOWN**, follow the same live market, and settle the result without leaving the chat.
 
@@ -17,6 +17,7 @@
 |------|---------|-------|------------|
 | Free XP | 2–100 | Minimum 10 XP | Internal XP ledger |
 | Testnet GRAM | 2–10 funded players | 0.10–20 test GRAM | TON Testnet |
+| Mainnet GRAM | 2–10 funded players | Deployment-defined real GRAM limits | TON Mainnet, disabled by default |
 
 Both modes use the same Coinbase BTC/USD feed and game flow:
 
@@ -35,7 +36,7 @@ Players connect a self-custodial wallet through the official TON Connect interfa
 
 Every stake request contains a random, single-use payment ID in its TON message body. A player becomes funded only after the backend independently verifies all of the following on chain:
 
-- TON Testnet network
+- Configured TON network, isolated per battle
 - Connected sender wallet
 - Kampit escrow destination
 - Exact GRAM amount
@@ -60,7 +61,7 @@ Only the escrow recovery phrase is supplied through the deployment secret manage
 - Live chart, synchronized countdown and ten-second prediction window
 - XP balances, daily grants, referrals, group statistics and leaderboard
 - TON Connect wallet picker
-- Native GRAM stakes on TON Testnet
+- Native GRAM stakes on isolated TON Testnet or Mainnet deployments
 - Ten-player paid-room limit
 - Unique on-chain payment references
 - 1% paid-game fee and equal winner distribution
@@ -80,7 +81,7 @@ Telegram group ── battle card ──▶ Telegram Mini App
                          bot · API · game · reconciler
                               │              │
                               ▼              ▼
-                         PostgreSQL      TON Testnet
+                         PostgreSQL      TON network
                                          TON Connect
                                  escrow · treasury
 ```
@@ -124,11 +125,13 @@ Bot commands:
 | `ADMIN_PASSWORD` | Password for the private `/admin` dashboard |
 | `DATABASE_BACKEND` | Set to `postgres` in deployment |
 | `DATABASE_URL` | PostgreSQL connection string |
-| `PAY_MODE_ENABLED` | Enables TON Testnet paid mode |
+| `PAY_MODE_ENABLED` | Enables paid mode; keep false during configuration and review |
 | `PAY_MODE_PUBLIC` | Makes paid mode available to every authenticated user |
 | `PAY_MODE_TESTERS` | Comma-separated Telegram tester IDs |
-| `TON_NETWORK` | Must remain `testnet` in this build |
-| `TON_RPC_URL` | TON Center-compatible Testnet endpoint |
+| `PAY_MIN_STAKE_GRAM` | Minimum paid stake; never lower than 0.10 |
+| `PAY_MAX_STAKE_GRAM` | Maximum paid stake; Mainnet defaults to 1.00 |
+| `TON_NETWORK` | `testnet` or `mainnet`; each battle records its network |
+| `TON_RPC_URL` | TON Center-compatible endpoint for the selected network |
 | `TON_API_KEY` | Dedicated TON Center API key; required when paid mode is enabled |
 | `TON_ESCROW_MNEMONIC` | Escrow wallet recovery phrase |
 | `TON_TREASURY_ADDRESS` | Public address that receives Kampit's fees |
@@ -140,6 +143,14 @@ pnpm setup:ton-testnet .pay-ton-testnet.env YOUR_TELEGRAM_ID
 ```
 
 The generated file is ignored by Git and created with owner-only permissions. Back it up securely before configuring Railway. Only `TON_ESCROW_MNEMONIC` and the public `TON_TREASURY_ADDRESS` belong in Railway; keep `TON_TREASURY_BACKUP_MNEMONIC` offline. Fund the escrow wallet with enough Testnet GRAM for stakes and payout fees.
+
+For a separate Mainnet deployment, generate fresh Mainnet-only wallets instead of reusing Testnet keys:
+
+```bash
+pnpm setup:ton-mainnet .pay-ton-mainnet.env YOUR_TELEGRAM_ID
+```
+
+Keep `PAY_MODE_ENABLED=false` and `PAY_MODE_PUBLIC=false` until the Mainnet configuration, independent security review, transaction limits, operational controls, and legal requirements are complete.
 
 ## Testing
 
@@ -157,7 +168,7 @@ The TON Connect manifest is served from `/tonconnect-manifest.json`; its icon an
 
 ## Safety status
 
-Paid mode is restricted to TON Testnet. Before any mainnet deployment, Kampit requires an independent smart-contract/payment review, operational monitoring, incident recovery procedures, legal and jurisdictional review, age/country controls and conservative transaction limits.
+The code supports network-isolated TON Mainnet battles, but the live Kampit deployment remains on Testnet. Mainnet activation requires fresh Mainnet-only wallets and API credentials, an independent payment review, operational monitoring, incident recovery procedures, legal and jurisdictional review, age/country controls, and conservative transaction limits.
 
 ## Resources
 

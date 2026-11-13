@@ -37,7 +37,7 @@ store.grantDaily();
 store.db.exec('CREATE TABLE IF NOT EXISTS processed_updates (update_id INTEGER PRIMARY KEY);');
 const engine = new Engine(store);
 const feed = new CoinbasePriceFeed();
-const bot = new Bot(token, username, shortName, engine, payConfig.allowedUsers, payConfig.enabled && payConfig.publicAccess);
+const bot = new Bot(token, username, shortName, engine, payConfig.allowedUsers, payConfig.enabled && payConfig.publicAccess, payConfig.network, payConfig.minStakeNano / 1e9, payConfig.maxStakeNano / 1e9);
 const sessions = new Map<string, { identity: TelegramIdentity; expires: number; battles: Set<string> }>();
 const streams = new Map<string, Set<{ res: ServerResponse; userId: string; sessionKey: string }>>();
 const pendingUpdates = new Map<number, Promise<void>>();
@@ -103,7 +103,7 @@ function view(id: string, userId: string) {
   const now = Date.now();
   const paid = store.paidBattle(id);
   let paymentProgress = null;
-  if (paid?.asset === 'gram') {
+  if (paid?.asset === 'gram' && paid.network === payConfig.network) {
     const funded = Number((store.db.prepare("SELECT COUNT(*) AS count FROM pay_intents WHERE battle_id=? AND kind='stake' AND state='confirmed'").get(id) as { count: number }).count);
     const settlement = store.db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN state='confirmed' THEN 1 ELSE 0 END),0) AS confirmed FROM pay_intents WHERE battle_id=? AND kind IN ('payout','refund','house')").get(id) as { total: number; confirmed: number };
     const confirmedIds = new Set((store.db.prepare("SELECT user_id FROM pay_intents WHERE battle_id=? AND kind='stake' AND state='confirmed'").all(id) as { user_id: string }[]).map(row => row.user_id));
@@ -142,7 +142,7 @@ async function settlePaidBattle(id: string) {
   if (!payMode || settling.has(id)) return;
   settling.add(id);
   try {
-    const paid = store.paidBattle(id); if (!paid || paid.asset !== 'gram' || paid.settlement_status === 'settled') return;
+    const paid = store.paidBattle(id); if (!paid || paid.asset !== 'gram' || paid.network !== payConfig.network || paid.settlement_status === 'settled') return;
     const battle = engine.require(id); if (!['finished', 'void'].includes(battle.status)) return;
     const confirmedIntents = store.db.prepare("SELECT user_id,amount_minor,signature,updated_at FROM pay_intents WHERE battle_id=? AND kind='stake' AND state='confirmed' AND signature IS NOT NULL").all(id) as { user_id: string; amount_minor: number; signature: string; updated_at: number }[];
     const repair = store.db.prepare("INSERT OR IGNORE INTO pay_transfers(battle_id,user_id,kind,amount_minor,signature,created_at) VALUES(?,?,'stake',?,?,?)");
@@ -161,7 +161,7 @@ async function settlePaidBattle(id: string) {
     store.db.prepare("UPDATE paid_battles SET settlement_status='settled' WHERE battle_id=?").run(id); broadcast(id);
   } finally { settling.delete(id); }
 }
-engine.on('resolved', battle => void settlePaidBattle(battle.id).catch(error => console.error('Testnet GRAM settlement:', safeError(error))));
+engine.on('resolved', battle => void settlePaidBattle(battle.id).catch(error => console.error(`${payConfig.network} GRAM settlement:`, safeError(error))));
 const migratedBattles = activateMarket(engine);
 if (migratedBattles.length) console.log(`Market changed to ${MARKET_PRODUCT}; voided ${migratedBattles.length} unfinished battle(s).`);
 feed.start();
@@ -179,14 +179,14 @@ setInterval(() => {
 }, 5000);
 setInterval(() => {
   if (!payMode) return;
-  const rows = store.db.prepare("SELECT pb.battle_id AS id FROM paid_battles pb JOIN battles b ON b.id=pb.battle_id WHERE pb.asset='gram' AND pb.settlement_status='pending' AND b.status IN ('finished','void')").all() as { id: string }[];
-  for (const row of rows) void settlePaidBattle(row.id).catch(error => console.error('Testnet GRAM settlement retry:', safeError(error)));
+  const rows = store.db.prepare("SELECT pb.battle_id AS id FROM paid_battles pb JOIN battles b ON b.id=pb.battle_id WHERE pb.asset='gram' AND pb.network=? AND pb.settlement_status='pending' AND b.status IN ('finished','void')").all(payConfig.network) as { id: string }[];
+  for (const row of rows) void settlePaidBattle(row.id).catch(error => console.error(`${payConfig.network} GRAM settlement retry:`, safeError(error)));
 }, 10000);
 async function reconcilePayments() {
   if (!payMode) return;
   try {
     const next = await payMode.reconcile();
-    const delayed = Number((store.db.prepare("SELECT COUNT(*) AS count FROM paid_battles pb JOIN battles b ON b.id=pb.battle_id WHERE pb.asset='gram' AND pb.settlement_status='pending' AND b.status IN ('finished','void') AND b.end_at IS NOT NULL AND b.end_at<?").get(Date.now() - 60_000) as { count: number }).count);
+    const delayed = Number((store.db.prepare("SELECT COUNT(*) AS count FROM paid_battles pb JOIN battles b ON b.id=pb.battle_id WHERE pb.asset='gram' AND pb.network=? AND pb.settlement_status='pending' AND b.status IN ('finished','void') AND b.end_at IS NOT NULL AND b.end_at<?").get(payConfig.network, Date.now() - 60_000) as { count: number }).count);
     if (delayed) next.alerts.push(`${delayed} paid settlement(s) have exceeded 60 seconds`);
     const changed = JSON.stringify(next.alerts) !== JSON.stringify(paymentHealth?.alerts || []);
     paymentHealth = next;
@@ -296,7 +296,7 @@ const server = createServer(async (req, res) => {
         engine.join(id, String(actor.user.id), [actor.user.first_name, actor.user.last_name].filter(Boolean).join(' ')); json(res, 200, view(id, String(actor.user.id))); return;
       }
       if (req.method === 'POST' && parts[3] === 'stake') {
-        const paid = store.paidBattle(id); if (!paid || paid.asset !== 'gram' || !payMode) throw new GameError('GRAM test battle is unavailable', 404);
+        const paid = store.paidBattle(id); if (!paid || paid.asset !== 'gram' || paid.network !== payConfig.network || !payMode) throw new GameError(`GRAM ${payConfig.network} battle is unavailable`, 404);
         if (engine.require(id).status !== 'lobby') throw new GameError('Lobby is closed');
         const player = store.players(id).find(item => item.user_id === actorId); if (!player) throw new GameError('Join the lobby first');
         const data = await body(req); json(res, 200, await payMode.prepareStake(id, actorId, paid.stake_minor, String(data.walletAddress || ''))); return;
@@ -304,7 +304,7 @@ const server = createServer(async (req, res) => {
       if (req.method === 'POST' && parts[3] === 'ready') {
         const paid = store.paidBattle(id);
         if (paid) {
-          if (!payMode || paid.asset !== 'gram') throw new GameError('GRAM test mode is disabled', 503);
+          if (!payMode || paid.asset !== 'gram' || paid.network !== payConfig.network) throw new GameError(`GRAM ${paid.network} mode is disabled`, 503);
           const player = store.players(id).find(item => item.user_id === actorId);
           if (!player) throw new GameError('Join the lobby first');
           if (!player.ready) {

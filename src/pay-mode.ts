@@ -12,8 +12,8 @@ export const MAX_PAYMENT_CONCURRENCY = 4;
 const INTENT_TTL_MS = 5 * 60_000;
 
 export type PayConfig = {
-  enabled: boolean; publicAccess: boolean; network: 'testnet'; rpcUrl: string; apiKey: string;
-  escrowMnemonic: string; treasuryAddress: string; allowedUsers: Set<string>;
+  enabled: boolean; publicAccess: boolean; network: 'testnet' | 'mainnet'; rpcUrl: string; apiKey: string;
+  escrowMnemonic: string; treasuryAddress: string; minStakeNano: number; maxStakeNano: number; allowedUsers: Set<string>;
 };
 export type ChainTransfer = { hash: string; from: string; to: string; amountNano: number; comment: string };
 export type TonGateway = {
@@ -32,11 +32,13 @@ function canonical(value: string) { return Address.parse(value).toRawString(); }
 
 export function payConfigFromEnv(env = process.env): PayConfig {
   const network = env.TON_NETWORK || 'testnet';
-  if (network !== 'testnet') throw new Error('Pay mode is locked to TON testnet in this build');
+  if (network !== 'testnet' && network !== 'mainnet') throw new Error('TON_NETWORK must be testnet or mainnet');
+  const toNano = (value: string | undefined, fallback: number) => value == null || value === '' ? fallback : Math.round(Number(value) * NANO_GRAM);
   return {
-    enabled: env.PAY_MODE_ENABLED === 'true', publicAccess: env.PAY_MODE_PUBLIC === 'true', network: 'testnet',
-    rpcUrl: env.TON_RPC_URL || 'https://testnet.toncenter.com/api/v2/jsonRPC', apiKey: env.TON_API_KEY || '',
+    enabled: env.PAY_MODE_ENABLED === 'true', publicAccess: env.PAY_MODE_PUBLIC === 'true', network,
+    rpcUrl: env.TON_RPC_URL || (network === 'mainnet' ? 'https://toncenter.com/api/v2/jsonRPC' : 'https://testnet.toncenter.com/api/v2/jsonRPC'), apiKey: env.TON_API_KEY || '',
     escrowMnemonic: env.TON_ESCROW_MNEMONIC || '', treasuryAddress: env.TON_TREASURY_ADDRESS || '',
+    minStakeNano: toNano(env.PAY_MIN_STAKE_GRAM, MIN_STAKE_NANO), maxStakeNano: toNano(env.PAY_MAX_STAKE_GRAM, network === 'mainnet' ? NANO_GRAM : MAX_STAKE_NANO),
     allowedUsers: new Set((env.PAY_MODE_TESTERS || '').split(',').map(value => value.trim()).filter(Boolean)),
   };
 }
@@ -44,26 +46,28 @@ export function validatePayConfig(config: PayConfig) {
   if (!config.enabled) return;
   if (!config.publicAccess && !config.allowedUsers.size) throw new Error('Pay mode requires PAY_MODE_PUBLIC=true or PAY_MODE_TESTERS');
   if (!config.apiKey) throw new Error('TON_API_KEY is required when GRAM test mode is enabled');
+  if (!Number.isSafeInteger(config.minStakeNano) || !Number.isSafeInteger(config.maxStakeNano) || config.minStakeNano < MIN_STAKE_NANO || config.maxStakeNano > MAX_STAKE_NANO || config.minStakeNano > config.maxStakeNano) throw new Error('GRAM stake limits must stay between 0.10 and 20.00');
   if (![12, 24].includes(words(config.escrowMnemonic).length)) throw new Error('TON_ESCROW_MNEMONIC must contain a 12- or 24-word mnemonic');
   try { Address.parse(config.treasuryAddress); } catch { throw new Error('TON_TREASURY_ADDRESS must be a valid TON address'); }
 }
 
 export class TonCenterGateway implements TonGateway {
   private client: TonClient;
+  private network: 'testnet' | 'mainnet';
   private wallets = new Map<string, Promise<{ contract: WalletContractV5R1; secretKey: Buffer }>>();
   private sendQueue: Promise<void> = Promise.resolve();
-  constructor(config: PayConfig) { this.client = new TonClient({ endpoint: config.rpcUrl, apiKey: config.apiKey || undefined }); }
+  constructor(config: PayConfig) { this.network = config.network; this.client = new TonClient({ endpoint: config.rpcUrl, apiKey: config.apiKey || undefined }); }
   private wallet(mnemonic: string) {
     let value = this.wallets.get(mnemonic);
     if (!value) {
       value = mnemonicToPrivateKey(words(mnemonic)).then(key => ({
-        contract: WalletContractV5R1.create({ workchain: 0, publicKey: key.publicKey, walletId: { networkGlobalId: -3 } }), secretKey: key.secretKey,
+        contract: WalletContractV5R1.create({ workchain: 0, publicKey: key.publicKey, walletId: { networkGlobalId: this.network === 'mainnet' ? -239 : -3 } }), secretKey: key.secretKey,
       }));
       this.wallets.set(mnemonic, value);
     }
     return value;
   }
-  async address(mnemonic: string) { return (await this.wallet(mnemonic)).contract.address.toString({ testOnly: true, bounceable: false }); }
+  async address(mnemonic: string) { return (await this.wallet(mnemonic)).contract.address.toString({ testOnly: this.network === 'testnet', bounceable: false }); }
   async balance(address: string) { return Number(await this.client.getBalance(Address.parse(address))); }
   private async transactions(address: Address) {
     let lastError: unknown;
@@ -122,12 +126,12 @@ export class TonGramService {
   async info(userId: string) {
     this.assertTester(userId); const roles = await this.roleAddresses();
     const linked = this.store.db.prepare("SELECT address FROM pay_wallets WHERE user_id=? AND encrypted_secret='ton-connect'").get(userId) as { address: string } | undefined;
-    return { enabled: true, network: this.config.network, currency: 'Testnet GRAM', walletAddress: linked?.address || null, escrowAddress: roles.escrow };
+    return { enabled: true, network: this.config.network, currency: this.config.network === 'testnet' ? 'Testnet GRAM' : 'GRAM', walletAddress: linked?.address || null, escrowAddress: roles.escrow };
   }
   async prepareStake(battleId: string, userId: string, amountNano: number, walletAddress: string) {
     this.assertTester(userId);
-    if (!Number.isSafeInteger(amountNano) || amountNano < MIN_STAKE_NANO || amountNano > MAX_STAKE_NANO) throw new GameError('Stake must be between 0.10 and 20 GRAM');
-    let wallet: string; try { wallet = Address.parse(walletAddress).toString({ testOnly: true, bounceable: false }); } catch { throw new GameError('Connect a valid TON Testnet wallet'); }
+    if (!Number.isSafeInteger(amountNano) || amountNano < this.config.minStakeNano || amountNano > this.config.maxStakeNano) throw new GameError(`Stake must be between ${(this.config.minStakeNano / NANO_GRAM).toFixed(2)} and ${(this.config.maxStakeNano / NANO_GRAM).toFixed(2)} GRAM`);
+    let wallet: string; try { wallet = Address.parse(walletAddress).toString({ testOnly: this.config.network === 'testnet', bounceable: false }); } catch { throw new GameError(`Connect a valid TON ${this.config.network} wallet`); }
     const existing = this.intent(battleId, userId, 'stake'); if (existing?.state === 'confirmed') return { confirmed: true };
     const activeIntent = existing?.last_valid_block_height && existing.last_valid_block_height > Date.now();
     if (existing && activeIntent && existing.raw_transaction && canonical(existing.raw_transaction) !== canonical(wallet)) throw new GameError('Finish this stake with the wallet that created it, or wait for it to expire', 409);
@@ -141,7 +145,7 @@ export class TonGramService {
     else this.store.db.prepare("UPDATE pay_intents SET raw_transaction=?,blockhash=?,last_valid_block_height=?,updated_at=? WHERE battle_id=? AND user_id=? AND kind='stake' AND state!='confirmed'").run(wallet, paymentId, expiresAt, Date.now(), battleId, userId);
     this.store.db.prepare("INSERT INTO pay_wallets(user_id,address,encrypted_secret,created_at) VALUES(?,?,'ton-connect',?) ON CONFLICT(user_id) DO UPDATE SET address=excluded.address,encrypted_secret='ton-connect',privy_wallet_id=NULL").run(userId, wallet, Date.now());
     const roles = await this.roleAddresses();
-    return { confirmed: false, paymentId, address: roles.escrow, amountNano: String(amountNano), payload: commentBody(`kampit:${paymentId}`).toBoc().toString('base64'), validUntil: Math.floor(expiresAt / 1000), network: '-3' };
+    return { confirmed: false, paymentId, address: roles.escrow, amountNano: String(amountNano), payload: commentBody(`kampit:${paymentId}`).toBoc().toString('base64'), validUntil: Math.floor(expiresAt / 1000), network: this.config.network === 'mainnet' ? '-239' : '-3' };
   }
   async confirmStake(battleId: string, userId: string, amountNano: number) {
     const intent = this.intent(battleId, userId, 'stake');
@@ -187,13 +191,13 @@ export class TonGramService {
     this.store.db.prepare('INSERT OR IGNORE INTO pay_recoveries(source_signature,battle_id,user_id,amount_minor,refund_signature,created_at) VALUES(?,?,?,?,?,?)').run(sourceSignature, battleId, userId, amountNano, hash, Date.now());
     return (this.store.db.prepare('SELECT refund_signature FROM pay_recoveries WHERE source_signature=?').get(sourceSignature) as { refund_signature: string }).refund_signature;
   }
-  history(userId: string, limit = 50) { this.assertTester(userId); return (this.store.db.prepare("SELECT battle_id AS id,kind,amount_minor,state,signature,attempt,updated_at FROM pay_intents WHERE user_id=? AND kind!='withdrawal' ORDER BY updated_at DESC LIMIT ?").all(userId, Math.min(100, Math.max(1, limit))) as any[]).map(row => ({ id: row.id, kind: row.kind, amountNano: Number(row.amount_minor), state: row.state, hash: row.signature, updatedAt: Number(row.updated_at), explorerUrl: row.signature ? `https://testnet.tonviewer.com/transaction/${row.signature}` : null })); }
+  history(userId: string, limit = 50) { this.assertTester(userId); const explorer = this.config.network === 'mainnet' ? 'https://tonviewer.com' : 'https://testnet.tonviewer.com'; return (this.store.db.prepare("SELECT battle_id AS id,kind,amount_minor,state,signature,attempt,updated_at FROM pay_intents WHERE user_id=? AND kind!='withdrawal' ORDER BY updated_at DESC LIMIT ?").all(userId, Math.min(100, Math.max(1, limit))) as any[]).map(row => ({ id: row.id, kind: row.kind, amountNano: Number(row.amount_minor), state: row.state, hash: row.signature, updatedAt: Number(row.updated_at), explorerUrl: row.signature ? `${explorer}/transaction/${row.signature}` : null })); }
   async reconcile() {
-    const pendingStakes = this.store.db.prepare("SELECT * FROM pay_intents WHERE kind='stake' AND state='pending' ORDER BY updated_at LIMIT 100").all() as PaymentIntent[];
+    const pendingStakes = this.store.db.prepare("SELECT pi.* FROM pay_intents pi JOIN paid_battles pb ON pb.battle_id=pi.battle_id WHERE pi.kind='stake' AND pi.state='pending' AND pb.network=? ORDER BY pi.updated_at LIMIT 100").all(this.config.network) as PaymentIntent[];
     let recovered = 0, failed = 0;
     for (const row of pendingStakes) { try { await this.confirmStake(row.battle_id, row.user_id, row.amount_minor); recovered++; } catch (error) { if (!(error instanceof GameError && error.status === 409)) { failed++; console.error('GRAM reconciliation failed:', row.battle_id, error instanceof Error ? error.message : 'upstream error'); } } }
     const roles = await this.roleAddresses(), [escrowNano, treasuryNano] = await Promise.all([this.gateway.balance(roles.escrow), this.gateway.balance(roles.treasury)]);
-    const obligationsNano = Number((this.store.db.prepare("SELECT COALESCE(SUM(amount_minor),0) AS total FROM pay_intents WHERE kind IN ('payout','refund') AND state IN ('pending','signed')").get() as { total: number }).total);
+    const obligationsNano = Number((this.store.db.prepare("SELECT COALESCE(SUM(pi.amount_minor),0) AS total FROM pay_intents pi JOIN paid_battles pb ON pb.battle_id=pi.battle_id WHERE pi.kind IN ('payout','refund') AND pi.state IN ('pending','signed') AND pb.network=?").get(this.config.network) as { total: number }).total);
     return { checked: pendingStakes.length, recovered, failed, pending: pendingStakes.length - recovered, wallets: { escrow: { address: roles.escrow, balanceNano: escrowNano, obligationsNano }, treasury: { address: roles.treasury, balanceNano: treasuryNano } }, alerts: [...(escrowNano < obligationsNano ? ['Escrow GRAM is below pending payout obligations'] : []), ...(failed ? [`${failed} GRAM reconciliation attempt(s) need attention`] : [])] };
   }
 }

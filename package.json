@@ -11,7 +11,8 @@
     "dev": "node --watch --disable-warning=ExperimentalWarning src/server.ts",
     "test": "node --test --disable-warning=ExperimentalWarning test/*.test.ts",
     "db:migrate:postgres": "node --disable-warning=ExperimentalWarning scripts/migrate-sqlite-to-postgres.ts",
-    "setup:ton-testnet": "node --disable-warning=ExperimentalWarning scripts/setup-ton-testnet.ts"
+    "setup:ton-testnet": "node --disable-warning=ExperimentalWarning scripts/setup-ton-testnet.ts",
+    "setup:ton-mainnet": "node --disable-warning=ExperimentalWarning scripts/setup-ton-mainnet.ts"
   },
   "dependencies": {
     "@ton/core": "^0.63.1",

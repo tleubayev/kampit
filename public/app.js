@@ -30,7 +30,7 @@ async function openBattle(id, updateAddress=false) {
   stream?.close();stream=undefined;state=undefined;lastServerNow=0;battleId=id;transactionsExpanded=false;transactionsShowAll=false;
   if(updateAddress){const url=new URL(location.href);url.searchParams.set('battle',id);history.replaceState({},'',url);}
   const initial=await api(`/api/battles/${battleId}`); render(initial);
-  if(initial.battle.mode==='GRAM_TEST'){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};render(initial);}
+  if(initial.battle.mode==='GRAM_TEST'||initial.battle.mode==='GRAM_MAIN'){const [info,history]=await Promise.all([api('/api/pay'),api('/api/pay/history')]);payInfo={...info,...history};render(initial);}
   stream=new EventSource(`/api/battles/${battleId}/events`);
   stream.onmessage=event=>render(JSON.parse(event.data));
   stream.onerror=()=>{el('feedTime').textContent='RECONNECTING';};
@@ -48,7 +48,7 @@ window.disconnectTon=()=>tonConnectUi?.disconnect();
 window.fundAndReady=async()=>{
   if(requestBusy)return;
   if(!tonWallet){await tonConnectUi?.openModal();return;}
-  if(tonWallet.account.chain!=='-3'){const message='Connect a TON Testnet wallet.';if(tg?.showAlert)tg.showAlert(message);else alert(message);return;}
+  const expected=payInfo?.network==='mainnet'?'-239':'-3';if(tonWallet.account.chain!==expected){const message=`Connect a TON ${payInfo?.network||'testnet'} wallet.`;if(tg?.showAlert)tg.showAlert(message);else alert(message);return;}
   requestBusy=true;readyPaymentBusy=true;if(state)render(state);
   try{
     const intent=await api(`/api/battles/${battleId}/stake`,'POST',{walletAddress:connectedAddress()});
@@ -64,7 +64,7 @@ window.toggleTransactions=()=>{transactionsExpanded=!transactionsExpanded;if(!tr
 window.showAllTransactions=()=>{transactionsShowAll=true;if(state)render(state);};
 function transactionRow(tx){return `<div class="txRow"><span>${safe(tx.kind).toUpperCase()} · ${(tx.amountNano/1e9).toFixed(3)} GRAM</span><a class="${tx.state==='confirmed'?'green':tx.state==='failed'?'red':'purple'}" ${tx.explorerUrl?`href="${safe(tx.explorerUrl)}" target="_blank"`:''}>${safe(tx.state).toUpperCase()}</a></div>`;}
 function transactionHistory(items){const pending=items.find(tx=>tx.state==='pending'||tx.state==='signed');if(!transactionsExpanded)return `<div class="txList"><button class="txToggle" onclick="toggleTransactions()"><span>TRANSACTIONS · ${items.length}</span><b>⌄</b></button>${pending?transactionRow(pending):''}</div>`;const shown=transactionsShowAll?items:items.slice(0,5);return `<div class="txList"><button class="txToggle" onclick="toggleTransactions()"><span>TRANSACTIONS · ${items.length}</span><b>⌃</b></button>${shown.length?shown.map(transactionRow).join(''):'<div class="small">No transactions yet.</div>'}${!transactionsShowAll&&items.length>5?'<button class="txMore" onclick="showAllTransactions()">SHOW ALL</button>':''}</div>`;}
-function payTools(){if(!payInfo)return'';const transactions=payInfo.transactions||[],address=connectedAddress();return `<div class="payTools"><div class="payTitle"><b>TON CONNECT</b><span>TESTNET GRAM</span></div>${address?`<div class="walletAddress">${safe(address)}</div><button class="secondary" onclick="disconnectTon()">DISCONNECT</button>`:'<button class="primary" onclick="connectTon()">CONNECT TON WALLET</button>'}<div class="small">Your wallet stays self-custodial. Every stake is matched to this battle by a unique on-chain payment ID.</div>${transactionHistory(transactions)}</div>`;}
+function payTools(){if(!payInfo)return'';const transactions=payInfo.transactions||[],address=connectedAddress(),label=payInfo.network==='mainnet'?'MAINNET GRAM':'TESTNET GRAM';return `<div class="payTools"><div class="payTitle"><b>TON CONNECT</b><span>${label}</span></div>${address?`<div class="walletAddress">${safe(address)}</div><button class="secondary" onclick="disconnectTon()">DISCONNECT</button>`:'<button class="primary" onclick="connectTon()">CONNECT TON WALLET</button>'}<div class="small">Your wallet stays self-custodial. Every stake is matched to this battle by a unique on-chain payment ID.</div>${transactionHistory(transactions)}</div>`;}
 function showAccount(info) {
   accountInfo=info;
   el('balance').textContent=`${info.account.balance} XP`;
@@ -78,7 +78,7 @@ window.shareInvite=()=>{
 };
 function render(data) {
   if(data.serverNow !== lastServerNow){serverOffset=data.serverNow-Date.now();lastServerNow=data.serverNow;}state=data; const b=data.battle, now=Date.now()+serverOffset, remaining= b.status==='lobby'&&b.lobby_deadline?Math.max(0,b.lobby_deadline-now):b.status==='countdown'?Math.max(0,b.countdown_at-now):b.status==='live'?Math.max(0,b.end_at-now):0;
-  const paid=b.mode==='GRAM_TEST', stakeLabel=paid?`${(b.stakeMinor/1e9).toFixed(2)} TEST GRAM`:`${b.stake} XP`;
+  const paid=b.mode==='GRAM_TEST'||b.mode==='GRAM_MAIN', testnet=b.mode==='GRAM_TEST', stakeLabel=paid?`${(b.stakeMinor/1e9).toFixed(2)} ${testnet?'TEST ':''}GRAM`:`${b.stake} XP`;
   el('balance').textContent=paid?'TEST GRAM':`${data.account.balance} XP`;
   el('price').textContent=money(data.quote?.price || b.end_price || b.start_price);el('startPrice').textContent=money(b.start_price);
   const change=b.start_price&&data.quote ? (data.quote.price/b.start_price-1)*100 : null;
@@ -95,7 +95,7 @@ function render(data) {
     const start=creator&&readyCount>=2?'<button class="primary" onclick="doAction(\'start\')">START NOW</button>':'';
     const pool=readyCount*(b.stakeMinor||0),fee=Math.floor(pool*.01),prize=pool-fee;
     const terms=paid?`<div class="paymentSummary"><span>FUNDED PLAYERS <b>${data.paymentProgress?.fundedPlayers||0}/${b.maxPlayers}</b></span><span>POOL <b>${(pool/1e9).toFixed(3)} GRAM</b></span><span>1% FEE <b>${(fee/1e9).toFixed(4)} GRAM</b></span><span>WINNER POOL <b>${(prize/1e9).toFixed(4)} GRAM</b></span></div>`:'';
-    html=`<h1>${paid?'TON Testnet battle':'Join the battle'}</h1><p>${paid?'Testnet GRAM has no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins ${paid?'after two stakes confirm':'after the first player is ready'}. Unfunded players are excluded. ${readyCount} ready.</p>${terms}${action}${start}${paid?payTools():''}`;
+    html=`<h1>${paid?`TON ${testnet?'Testnet ':'Mainnet '}battle`:'Join the battle'}</h1><p>${testnet?'Testnet GRAM has no monetary value. ':''}Stake ${stakeLabel} when you ready up. The 30-second lobby timer begins ${paid?'after two stakes confirm':'after the first player is ready'}. Unfunded players are excluded. ${readyCount} ready.</p>${terms}${action}${start}${paid?payTools():''}`;
   }
   else if(b.status==='countdown') html='<h1>Get ready</h1><p>The round begins when a fresh market price is captured.</p>';
   else if(b.status==='live') {

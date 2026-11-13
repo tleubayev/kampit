@@ -11,9 +11,11 @@ export class Bot {
   private token: string; private username: string; private shortName: string; private engine: Engine;
   private payTesters: Set<string>;
   private publicPayMode: boolean;
+  private payNetwork: 'testnet' | 'mainnet';
+  private payMinGram: number; private payMaxGram: number;
   private battleLimiter = new SlidingWindowRateLimiter();
   private warningLimiter = new SlidingWindowRateLimiter();
-  constructor(token: string, username: string, shortName: string, engine: Engine, payTesters = new Set<string>(), publicPayMode = false) { this.token=token; this.username=username; this.shortName=shortName; this.engine=engine; this.payTesters=payTesters; this.publicPayMode=publicPayMode; }
+  constructor(token: string, username: string, shortName: string, engine: Engine, payTesters = new Set<string>(), publicPayMode = false, payNetwork: 'testnet' | 'mainnet' = 'testnet', payMinGram = 0.1, payMaxGram = payNetwork === 'mainnet' ? 1 : 20) { this.token=token; this.username=username; this.shortName=shortName; this.engine=engine; this.payTesters=payTesters; this.publicPayMode=publicPayMode; this.payNetwork=payNetwork; this.payMinGram=payMinGram; this.payMaxGram=payMaxGram; }
   link(id: string) { return `https://t.me/${this.username}/${this.shortName}?startapp=${id}`; }
   async call(method: string, body: Record<string, unknown>) {
     const response = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
@@ -38,16 +40,17 @@ export class Bot {
       { command: 'stats', description: 'Your group stats' },
       { command: 'referral', description: 'Get your invite link' },
       { command: 'cancel', description: 'Cancel your open lobby' },
-      ...(this.publicPayMode ? [{ command: 'paybattle', description: 'Start a TON Testnet GRAM battle' }] : []),
+      ...(this.publicPayMode ? [{ command: 'paybattle', description: `Start a TON ${this.payNetwork === 'testnet' ? 'Testnet ' : ''}GRAM battle` }] : []),
       { command: 'help', description: 'How to play' }
     ] });
   }
   async card(battle: Battle) {
     const paid = this.engine.store.paidBattle(battle.id);
-    const stakeLabel = paid ? `${(paid.stake_minor / 1_000_000_000).toFixed(2)} TEST GRAM` : `${battle.stake} XP`;
+    const testnet = paid?.network === 'testnet';
+    const stakeLabel = paid ? `${(paid.stake_minor / 1_000_000_000).toFixed(2)} ${testnet ? 'TEST ' : ''}GRAM` : `${battle.stake} XP`;
     const sent = await this.call('sendMessage', {
       chat_id: battle.chat_id,
-      text: `⚔️ BTC QUICK BATTLE · ${stakeLabel} STAKE${paid ? '\n🧪 TON TESTNET · TOKENS HAVE NO VALUE' : ''}\n\nReady up to lock ${stakeLabel}. The lobby runs for 30 seconds after ${paid ? 'two stakes confirm' : 'the first player readies up'}; unready players are excluded. Predict BTC/USD over 60 seconds. 2–${paid ? 10 : 100} players.`,
+      text: `⚔️ BTC QUICK BATTLE · ${stakeLabel} STAKE${testnet ? '\n🧪 TON TESTNET · TOKENS HAVE NO VALUE' : ''}\n\nReady up to lock ${stakeLabel}. The lobby runs for 30 seconds after ${paid ? 'two stakes confirm' : 'the first player readies up'}; unready players are excluded. Predict BTC/USD over 60 seconds. 2–${paid ? 10 : 100} players.`,
       reply_markup: { inline_keyboard: [[{ text: '⚔️ JOIN BATTLE', url: this.link(battle.id) }]] }
     });
     this.engine.store.db.prepare('UPDATE battles SET message_id=? WHERE id=?').run(sent.message_id, battle.id);
@@ -57,10 +60,10 @@ export class Bot {
     const players = this.engine.store.players(battle.id);
     const winners = players.filter(p => p.prediction && p.prediction === battle.outcome).map(p => p.name);
     const pool = players.filter(p => p.ready).length * (paid?.stake_minor || battle.stake);
-    const poolLabel = paid ? `${(pool / 1_000_000_000).toFixed(2)} test GRAM` : `${pool} XP`;
+    const poolLabel = paid ? `${(pool / 1_000_000_000).toFixed(2)} ${paid.network === 'testnet' ? 'test ' : ''}GRAM` : `${pool} XP`;
     const text = battle.status === 'void'
-      ? `⚠️ BTC QUICK BATTLE VOID\nAll staked ${paid ? 'test GRAM' : 'XP'} was refunded.`
-      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${direction(battle.outcome)} WINS`}\n\nBTC/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${poolLabel} retained by the test house.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `${paid ? 'Winners split the pool after the 1% house fee' : `Winners split ${poolLabel}`}: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
+      ? `⚠️ BTC QUICK BATTLE VOID\nAll staked ${paid ? `${paid.network === 'testnet' ? 'test ' : ''}GRAM` : 'XP'} was refunded.`
+      : `🏆 ${battle.outcome === 'TIE' ? 'TIE' : `${direction(battle.outcome)} WINS`}\n\nBTC/USD $${battle.start_price!.toFixed(2)} → $${battle.end_price!.toFixed(2)}\n${battle.outcome === 'HOUSE' ? `${poolLabel} retained by the house.` : battle.outcome === 'TIE' ? 'All stakes refunded.' : winners.length ? `${paid ? 'Winners split the pool after the 1% house fee' : `Winners split ${poolLabel}`}: ${winners.join(', ')}` : 'No winning picks. All stakes refunded.'}\n\nUse Rematch in the Mini App to play again.`;
     await this.call('sendMessage', { chat_id: battle.chat_id, text,
       reply_markup: { inline_keyboard: [[{ text: 'VIEW RESULT / REMATCH', url: this.link(battle.id) }]] } });
   }
@@ -90,11 +93,11 @@ export class Bot {
         await this.call('sendMessage', { chat_id: chatId, text: 'Stake must be a whole number of at least 10 XP. Example: /battle 50' });
       } else if (message.from) await this.startBattle(message, message.from, Number(amount));
     } else if (command === '/paybattle' && message.from) {
-      if (!this.publicPayMode && !this.payTesters.has(String(message.from.id))) { await this.call('sendMessage', { chat_id: chatId, text: 'Private TON Testnet test only.' }); return; }
-      if (!['group', 'supergroup'].includes(message.chat.type)) { await this.call('sendMessage', { chat_id: chatId, text: 'Use /paybattle in a test group.' }); return; }
+      if (!this.publicPayMode && !this.payTesters.has(String(message.from.id))) { await this.call('sendMessage', { chat_id: chatId, text: `Private TON ${this.payNetwork} test only.` }); return; }
+      if (!['group', 'supergroup'].includes(message.chat.type)) { await this.call('sendMessage', { chat_id: chatId, text: 'Use /paybattle in a group.' }); return; }
       const amount = message.text.trim().split(/\s+/)[1] || '0.10';
-      if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) < 0.1 || Number(amount) > 20) { await this.call('sendMessage', { chat_id: chatId, text: 'Use /paybattle with a stake between 0.10 and 20 test GRAM.' }); return; }
-      const existing = this.engine.store.active(chatId), battle = existing || this.engine.createPaid(chatId, Math.round(Number(amount) * 1_000_000_000), String(message.from.id));
+      if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) < this.payMinGram || Number(amount) > this.payMaxGram) { await this.call('sendMessage', { chat_id: chatId, text: `Use /paybattle with a stake between ${this.payMinGram.toFixed(2)} and ${this.payMaxGram.toFixed(2)} ${this.payNetwork === 'testnet' ? 'test ' : ''}GRAM.` }); return; }
+      const existing = this.engine.store.active(chatId), battle = existing || this.engine.createPaid(chatId, Math.round(Number(amount) * 1_000_000_000), String(message.from.id), Date.now(), this.payNetwork);
       if (!existing) await this.card(battle); else await this.call('sendMessage', { chat_id: chatId, text: 'A battle is already open.', reply_markup: { inline_keyboard: [[{ text: 'JOIN BATTLE', url: this.link(battle.id) }]] } });
     } else if (command === '/cancel' && message.from) {
       const battle = this.engine.store.active(chatId);
@@ -118,7 +121,7 @@ export class Bot {
       this.engine.store.ensureAccount(String(message.from.id), message.from.first_name);
       await this.call('sendMessage', { chat_id: chatId, text: `${awarded ? 'Invitation accepted. ' : ''}You have 1000 starting XP. Add me to a group and send /battle to choose a stake and play.` });
     } else if (command === '/help') {
-      await this.call('sendMessage', { chat_id: chatId, text: 'Add this bot to a group. Use /battle for 2–100 player XP games or /paybattle for 2–10 player TON Testnet GRAM games. XP lobbies start their 30-second timer with the first ready player; paid lobbies start it after two stakes confirm. Unready players are excluded. Pick UP or DOWN in the first 10 seconds of a 60-second round. Every account receives 100 XP daily at 00:00 UTC.' });
+      await this.call('sendMessage', { chat_id: chatId, text: `Add this bot to a group. Use /battle for 2–100 player XP games or /paybattle for 2–10 player TON ${this.payNetwork === 'testnet' ? 'Testnet ' : ''}GRAM games. XP lobbies start their 30-second timer with the first ready player; paid lobbies start it after two stakes confirm. Unready players are excluded. Pick UP or DOWN in the first 10 seconds of a 60-second round. Every account receives 100 XP daily at 00:00 UTC.` });
     }
   }
   async startBattle(message: TgMessage, creator: TgUser, stake: number) {

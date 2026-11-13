@@ -27,14 +27,14 @@ export class Engine extends EventEmitter {
     this.emit('change', battle);
     return battle;
   }
-  createPaid(chatId: string, stakeMinor: number, creatorUserId: string, now = Date.now()): Battle {
-    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000_000 || stakeMinor > MAX_PAID_STAKE_MINOR || !Number.isSafeInteger(stakeMinor * MAX_PAID_PLAYERS)) throw new GameError('Test stake must be between 0.10 and 20.00 GRAM');
+  createPaid(chatId: string, stakeMinor: number, creatorUserId: string, now = Date.now(), network: 'testnet' | 'mainnet' = 'testnet'): Battle {
+    if (!Number.isSafeInteger(stakeMinor) || stakeMinor < 100_000_000 || stakeMinor > MAX_PAID_STAKE_MINOR || !Number.isSafeInteger(stakeMinor * MAX_PAID_PLAYERS)) throw new GameError('Stake must be between 0.10 and 20.00 GRAM');
     const existing = this.store.active(chatId); if (existing) return existing;
     const id = randomBytes(8).toString('hex');
     this.store.db.exec('BEGIN IMMEDIATE');
     try {
       this.store.db.prepare('INSERT INTO battles(id,chat_id,status,created_at,stake,creator_user_id) VALUES(?,?,?,?,0,?)').run(id, chatId, 'lobby', now, creatorUserId);
-      this.store.db.prepare("INSERT INTO paid_battles(battle_id,stake_minor,asset) VALUES(?,?,'gram')").run(id, stakeMinor);
+      this.store.db.prepare("INSERT INTO paid_battles(battle_id,stake_minor,asset,network) VALUES(?,?,'gram',?)").run(id, stakeMinor, network);
       this.store.db.exec('COMMIT');
     } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
     const battle = this.require(id); this.emit('change', battle); return battle;
@@ -46,7 +46,7 @@ export class Engine extends EventEmitter {
     if (battle.successor_id) return this.require(battle.successor_id);
     const paid = this.store.paidBattle(id);
     if (paid && paid.asset !== 'gram') throw new GameError('Start a new GRAM battle from the group chat');
-    const next = paid ? this.createPaid(battle.chat_id, paid.stake_minor, userId, now) : this.create(battle.chat_id, battle.stake || 10, userId, now, id);
+    const next = paid ? this.createPaid(battle.chat_id, paid.stake_minor, userId, now, paid.network) : this.create(battle.chat_id, battle.stake || 10, userId, now, id);
     this.store.db.prepare('UPDATE battles SET successor_id=? WHERE id=?').run(next.id, id);
     return next;
   }

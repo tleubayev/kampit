@@ -42,6 +42,13 @@ test('paid battle accepts 10 players and rejects the 11th', () => {
   store.close();
 });
 
+test('paid battles retain their TON network across rematches', () => {
+  const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000_000, '1', 1000, 'mainnet');
+  engine.join(battle.id, '1', 'A'); engine.join(battle.id, '2', 'B'); engine.readyPaid(battle.id, '1', 1100); engine.readyPaid(battle.id, '2', 1200);
+  engine.startNow(battle.id, '1', 1300); engine.tick(4300, quote(100, 4300)); engine.predict(battle.id, '1', 'LONG', 5000); engine.predict(battle.id, '2', 'SHORT', 5000); engine.tick(64300, quote(101, 64300));
+  const next = engine.rematch(battle.id, '1', 65000); assert.equal(store.paidBattle(next.id)?.network, 'mainnet'); store.close();
+});
+
 test('ten-player paid round advances with all funded players', () => {
   const store = new Store(':memory:'), engine = new Engine(store), battle = engine.createPaid('g', 100_000_000, '1', 1000);
   for (let i = 1; i <= MAX_PAID_PLAYERS; i++) { engine.join(battle.id, String(i), `Player ${i}`); engine.readyPaid(battle.id, String(i), 1000 + i); }

@@ -2,7 +2,7 @@ import type { Account, Battle, Player } from './store.ts';
 
 type StatsRow = { user_id: string; name: string; wins: number; losses: number; ties: number; streak: number; xp: number };
 
-export function publicBattle(battle: Battle, userId: string, paid?: { stake_minor: number; settlement_status: string }) {
+export function publicBattle(battle: Battle, userId: string, paid?: { stake_minor: number; settlement_status: string; asset: string; network: 'testnet' | 'mainnet' }) {
   return {
     id: battle.id,
     status: battle.status,
@@ -16,7 +16,7 @@ export function publicBattle(battle: Battle, userId: string, paid?: { stake_mino
     end_price: battle.end_price,
     outcome: battle.outcome,
     stake: battle.stake,
-    mode: paid?.asset === 'gram' ? 'GRAM_TEST' : paid ? 'LEGACY_PAID' : 'XP',
+    mode: paid?.asset === 'gram' ? (paid.network === 'mainnet' ? 'GRAM_MAIN' : 'GRAM_TEST') : paid ? 'LEGACY_PAID' : 'XP',
     maxPlayers: paid ? 10 : 100,
     stakeMinor: paid?.stake_minor,
     settlementStatus: paid?.settlement_status,
