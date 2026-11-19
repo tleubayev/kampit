@@ -13,9 +13,10 @@ export class Bot {
   private publicPayMode: boolean;
   private payNetwork: 'testnet' | 'mainnet';
   private payMinGram: number; private payMaxGram: number;
+  private paySafety: () => boolean;
   private battleLimiter = new SlidingWindowRateLimiter();
   private warningLimiter = new SlidingWindowRateLimiter();
-  constructor(token: string, username: string, shortName: string, engine: Engine, payTesters = new Set<string>(), publicPayMode = false, payNetwork: 'testnet' | 'mainnet' = 'testnet', payMinGram = 0.1, payMaxGram = payNetwork === 'mainnet' ? 1 : 20) { this.token=token; this.username=username; this.shortName=shortName; this.engine=engine; this.payTesters=payTesters; this.publicPayMode=publicPayMode; this.payNetwork=payNetwork; this.payMinGram=payMinGram; this.payMaxGram=payMaxGram; }
+  constructor(token: string, username: string, shortName: string, engine: Engine, payTesters = new Set<string>(), publicPayMode = false, payNetwork: 'testnet' | 'mainnet' = 'testnet', payMinGram = 0.1, payMaxGram = payNetwork === 'mainnet' ? 1 : 20, paySafety = () => true) { this.token=token; this.username=username; this.shortName=shortName; this.engine=engine; this.payTesters=payTesters; this.publicPayMode=publicPayMode; this.payNetwork=payNetwork; this.payMinGram=payMinGram; this.payMaxGram=payMaxGram; this.paySafety=paySafety; }
   link(id: string) { return `https://t.me/${this.username}/${this.shortName}?startapp=${id}`; }
   async call(method: string, body: Record<string, unknown>) {
     const response = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
@@ -94,6 +95,7 @@ export class Bot {
       } else if (message.from) await this.startBattle(message, message.from, Number(amount));
     } else if (command === '/paybattle' && message.from) {
       if (!this.publicPayMode && !this.payTesters.has(String(message.from.id))) { await this.call('sendMessage', { chat_id: chatId, text: `Private TON ${this.payNetwork} test only.` }); return; }
+      if (!this.paySafety()) { await this.call('sendMessage', { chat_id: chatId, text: 'Paid battles are temporarily paused while the escrow reserve is replenished.' }); return; }
       if (!['group', 'supergroup'].includes(message.chat.type)) { await this.call('sendMessage', { chat_id: chatId, text: 'Use /paybattle in a group.' }); return; }
       const amount = message.text.trim().split(/\s+/)[1] || '0.10';
       if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) < this.payMinGram || Number(amount) > this.payMaxGram) { await this.call('sendMessage', { chat_id: chatId, text: `Use /paybattle with a stake between ${this.payMinGram.toFixed(2)} and ${this.payMaxGram.toFixed(2)} ${this.payNetwork === 'testnet' ? 'test ' : ''}GRAM.` }); return; }

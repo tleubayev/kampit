@@ -37,7 +37,7 @@ store.grantDaily();
 store.db.exec('CREATE TABLE IF NOT EXISTS processed_updates (update_id INTEGER PRIMARY KEY);');
 const engine = new Engine(store);
 const feed = new CoinbasePriceFeed();
-const bot = new Bot(token, username, shortName, engine, payConfig.allowedUsers, payConfig.enabled && payConfig.publicAccess, payConfig.network, payConfig.minStakeNano / 1e9, payConfig.maxStakeNano / 1e9);
+const bot = new Bot(token, username, shortName, engine, payConfig.allowedUsers, payConfig.enabled && payConfig.publicAccess, payConfig.network, payConfig.minStakeNano / 1e9, payConfig.maxStakeNano / 1e9, () => !!payMode?.canAcceptStakes());
 const sessions = new Map<string, { identity: TelegramIdentity; expires: number; battles: Set<string> }>();
 const streams = new Map<string, Set<{ res: ServerResponse; userId: string; sessionKey: string }>>();
 const pendingUpdates = new Map<number, Promise<void>>();
@@ -155,9 +155,9 @@ async function settlePaidBattle(id: string) {
     const winners = entrants.filter(player => player.prediction === battle.outcome);
     const distribution = paidDistribution(entrants.map(player => player.user_id), winners.map(player => player.user_id), paid.stake_minor, battle.outcome === 'HOUSE', battle.status === 'void');
     for (const player of orphaned) await payMode.pay(player.user_id, id, 'refund', paid.stake_minor);
-    if (distribution.houseMinor) await payMode.house(id, distribution.houseMinor);
     for (const [userId, amountMinor] of distribution.payouts) await payMode.pay(userId, id, 'payout', amountMinor);
     for (const [userId, amountMinor] of distribution.refunds) await payMode.pay(userId, id, 'refund', amountMinor);
+    if (distribution.houseMinor) await payMode.house(id, distribution.houseMinor);
     store.db.prepare("UPDATE paid_battles SET settlement_status='settled' WHERE battle_id=?").run(id); broadcast(id);
   } finally { settling.delete(id); }
 }
@@ -332,6 +332,7 @@ const server = createServer(async (req, res) => {
         engine.predict(id, String(actor.user.id), data.side as any); json(res, 200, view(id, String(actor.user.id))); return;
       }
       if (req.method === 'POST' && parts[3] === 'rematch') {
+        if (store.paidBattle(id) && !payMode?.canAcceptStakes()) throw new GameError('Paid battles are temporarily paused while the escrow reserve is replenished', 503);
         const next = engine.rematch(id, String(actor.user.id));
         access.session.battles.add(next.id);
         if (!next.message_id) void bot.card(next).catch(error => console.error('Rematch card:', safeError(error)));

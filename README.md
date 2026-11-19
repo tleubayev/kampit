@@ -130,6 +130,7 @@ Bot commands:
 | `PAY_MODE_TESTERS` | Comma-separated Telegram tester IDs |
 | `PAY_MIN_STAKE_GRAM` | Minimum paid stake; never lower than 0.10 |
 | `PAY_MAX_STAKE_GRAM` | Maximum paid stake; Mainnet defaults to 1.00 |
+| `PAY_ESCROW_RESERVE_GRAM` | Minimum escrow balance kept above player liabilities; defaults to 0.05 GRAM |
 | `TON_NETWORK` | `testnet` or `mainnet`; each battle records its network |
 | `TON_RPC_URL` | TON Center-compatible endpoint for the selected network |
 | `TON_API_KEY` | Dedicated TON Center API key; required when paid mode is enabled |
@@ -168,7 +169,7 @@ The TON Connect manifest is served from `/tonconnect-manifest.json`; its icon an
 
 ## Safety status
 
-The code supports network-isolated TON Mainnet battles, but the live Kampit deployment remains on Testnet. Mainnet activation requires fresh Mainnet-only wallets and API credentials, an independent payment review, operational monitoring, incident recovery procedures, legal and jurisdictional review, age/country controls, and conservative transaction limits.
+The code supports network-isolated TON mainnet and testnet battles. The live network is selected through deployment configuration. Mainnet operation requires Mainnet-only wallets and API credentials, an independent payment review, operational monitoring, incident recovery procedures, legal and jurisdictional review, age/country controls, and conservative transaction limits.
 
 ## Resources
 

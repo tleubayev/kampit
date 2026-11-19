@@ -67,6 +67,12 @@ export class Store {
     const paidBattleColumns = this.db.prepare('PRAGMA table_info(paid_battles)').all() as { name: string }[];
     if (!paidBattleColumns.some(c => c.name === 'asset')) this.db.exec("ALTER TABLE paid_battles ADD COLUMN asset TEXT NOT NULL DEFAULT 'legacy_usdc'");
     if (!paidBattleColumns.some(c => c.name === 'network')) this.db.exec("ALTER TABLE paid_battles ADD COLUMN network TEXT NOT NULL DEFAULT 'testnet'");
+    const payIntentColumns = this.db.prepare('PRAGMA table_info(pay_intents)').all() as { name: string }[];
+    if (!payIntentColumns.some(c => c.name === 'claim_token')) this.db.exec('ALTER TABLE pay_intents ADD COLUMN claim_token TEXT');
+    if (!payIntentColumns.some(c => c.name === 'claim_expires_at')) this.db.exec('ALTER TABLE pay_intents ADD COLUMN claim_expires_at INTEGER');
+    this.db.exec(`CREATE TABLE IF NOT EXISTS pay_chain_cursors (network TEXT NOT NULL,account_address TEXT NOT NULL,last_lt TEXT NOT NULL,last_hash TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(network,account_address));
+      CREATE TABLE IF NOT EXISTS pay_chain_transfers (signature TEXT PRIMARY KEY,network TEXT NOT NULL,account_address TEXT NOT NULL,direction TEXT NOT NULL CHECK(direction IN ('incoming','outgoing')),from_address TEXT NOT NULL,to_address TEXT NOT NULL,amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),comment TEXT NOT NULL,created_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS pay_chain_transfers_account ON pay_chain_transfers(network,account_address,created_at DESC);`);
     const accountColumns = this.db.prepare('PRAGMA table_info(accounts)').all() as { name: string }[];
     if (!accountColumns.some(c => c.name === 'created_at')) this.db.exec('ALTER TABLE accounts ADD COLUMN created_at INTEGER');
     if (!accountColumns.some(c => c.name === 'last_seen_at')) this.db.exec('ALTER TABLE accounts ADD COLUMN last_seen_at INTEGER');

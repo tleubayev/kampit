@@ -16,7 +16,7 @@ async function wallet() {
 const [escrow, treasury] = await Promise.all([wallet(), wallet()]);
 writeFileSync(output, [
   'PAY_MODE_ENABLED=false', 'PAY_MODE_PUBLIC=false', 'TON_NETWORK=testnet',
-  'PAY_MIN_STAKE_GRAM=0.10', 'PAY_MAX_STAKE_GRAM=20.00',
+  'PAY_MIN_STAKE_GRAM=0.10', 'PAY_MAX_STAKE_GRAM=20.00', 'PAY_ESCROW_RESERVE_GRAM=0.05',
   'TON_RPC_URL=https://testnet.toncenter.com/api/v2/jsonRPC', 'TON_API_KEY=',
   `TON_ESCROW_MNEMONIC=${JSON.stringify(escrow.mnemonic)}`, `TON_TREASURY_ADDRESS=${treasury.address}`,
   `TON_TREASURY_BACKUP_MNEMONIC=${JSON.stringify(treasury.mnemonic)}`, `PAY_MODE_TESTERS=${tester}`, '',

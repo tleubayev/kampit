@@ -40,3 +40,14 @@ test('battle requests are limited to three per group per minute', async () => {
   assert.equal(texts.filter(text => text.startsWith('Too many battle requests')).length, 1);
   store.close();
 });
+
+test('paid room creation pauses when escrow safety is unavailable', async () => {
+  const store = new Store(':memory:');
+  const bot = new Bot('test:token', 'Kampit_robot', 'play', new Engine(store), new Set(), true, 'mainnet', 0.1, 1, () => false);
+  const sent: { method: string; body: Record<string, unknown> }[] = [];
+  bot.call = async (method, body) => { sent.push({ method, body }); return { message_id: sent.length }; };
+  await bot.handle({ update_id: 1, message: { message_id: 1, chat: { id: -300, type: 'group' }, from: { id: 1, first_name: 'Ali' }, text: '/paybattle 0.10' } });
+  assert.equal(store.active('-300'), undefined);
+  assert.match(String(sent.at(-1)?.body.text), /temporarily paused/);
+  store.close();
+});

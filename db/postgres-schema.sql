@@ -65,8 +65,24 @@ CREATE TABLE IF NOT EXISTS pay_intents (
   state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','signed','confirmed','failed')),
   signature text UNIQUE, raw_transaction text, blockhash text,
   last_valid_block_height bigint, attempt integer NOT NULL DEFAULT 0,
+  claim_token text, claim_expires_at bigint,
   updated_at bigint NOT NULL, PRIMARY KEY(battle_id,user_id,kind)
 );
+ALTER TABLE pay_intents ADD COLUMN IF NOT EXISTS claim_token text;
+ALTER TABLE pay_intents ADD COLUMN IF NOT EXISTS claim_expires_at bigint;
+CREATE TABLE IF NOT EXISTS pay_chain_cursors (
+  network text NOT NULL, account_address text NOT NULL, last_lt text NOT NULL,
+  last_hash text NOT NULL, updated_at bigint NOT NULL,
+  PRIMARY KEY(network,account_address)
+);
+CREATE TABLE IF NOT EXISTS pay_chain_transfers (
+  signature text PRIMARY KEY, network text NOT NULL, account_address text NOT NULL,
+  direction text NOT NULL CHECK(direction IN ('incoming','outgoing')),
+  from_address text NOT NULL, to_address text NOT NULL,
+  amount_minor bigint NOT NULL CHECK(amount_minor > 0), comment text NOT NULL,
+  created_at bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pay_chain_transfers_account ON pay_chain_transfers(network,account_address,created_at DESC);
 CREATE TABLE IF NOT EXISTS pay_withdrawals (
   id text PRIMARY KEY, user_id text NOT NULL, recipient text NOT NULL,
   amount_minor bigint NOT NULL CHECK(amount_minor > 0), created_at bigint NOT NULL,
